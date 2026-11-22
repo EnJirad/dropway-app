@@ -29,6 +29,7 @@ import com.pocketdev.dropway.core.util.LocationUtils
 import com.pocketdev.dropway.core.util.MoneyUtils
 import com.pocketdev.dropway.core.util.PhoneUtils
 import com.pocketdev.dropway.ui.components.DeliveryStatusBadge
+import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
 import com.pocketdev.dropway.ui.components.PaymentStatusBadge
 import com.pocketdev.dropway.ui.screens.cod.RecordPaymentDialog
 import com.pocketdev.dropway.ui.theme.*
@@ -233,21 +234,21 @@ fun TodayDeliveriesScreen(
                         }
                     }
 
-                    // Search input
+                    // Search input with high-contrast text
                     Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("ค้นหาเลขพัสดุ, ชื่อ, เบอร์, ที่อยู่...") },
                         singleLine = true,
-                        leadingIcon = { Icon(painter = painterResource(id = R.drawable.ic_search), contentDescription = null, tint = Color.Gray, modifier = Modifier.size(16.dp)) },
+                        leadingIcon = { Icon(painter = painterResource(id = R.drawable.ic_search), contentDescription = null, tint = DropwayPrimary, modifier = Modifier.size(16.dp)) },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
-                                Icon(painter = painterResource(id = R.drawable.ic_close), contentDescription = "ล้าง", tint = Color.Gray, modifier = Modifier.size(16.dp).clickable { searchQuery = "" })
+                                Icon(painter = painterResource(id = R.drawable.ic_close), contentDescription = "ล้าง", tint = Color(0xFF475569), modifier = Modifier.size(16.dp).clickable { searchQuery = "" })
                             }
                         },
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(12.dp)
                     )
 
                     // Filter chips & Grouping toggle

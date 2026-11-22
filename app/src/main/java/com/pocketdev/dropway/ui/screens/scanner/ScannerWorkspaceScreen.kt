@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.sp
 import com.pocketdev.dropway.DropwayApplication
 import com.pocketdev.dropway.core.model.Parcel
 import com.pocketdev.dropway.core.util.TrackingUtils
+import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
 import com.pocketdev.dropway.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -159,7 +160,7 @@ fun BarcodeScanWorkspace(onParcelSaved: () -> Unit) {
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = barcodeInput,
                     onValueChange = {
                         barcodeInput = it
@@ -168,7 +169,7 @@ fun BarcodeScanWorkspace(onParcelSaved: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("สแกนหรือกรอกเลขพัสดุ (เช่น TH123456789)") },
                     singleLine = true,
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(12.dp)
                 )
 
                 if (duplicateWarning != null) {

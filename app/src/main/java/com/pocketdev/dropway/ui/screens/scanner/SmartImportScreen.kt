@@ -23,6 +23,7 @@ import com.pocketdev.dropway.core.util.MoneyUtils
 import com.pocketdev.dropway.core.util.ParsedParcelRow
 import com.pocketdev.dropway.core.util.SmartTextParser
 import com.pocketdev.dropway.core.util.TrackingUtils
+import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
 import com.pocketdev.dropway.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -74,7 +75,7 @@ fun SmartImportScreen(
                     )
 
                     Spacer(modifier = Modifier.height(14.dp))
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = rawInputText,
                         onValueChange = { rawInputText = it },
                         modifier = Modifier
@@ -83,7 +84,7 @@ fun SmartImportScreen(
                         placeholder = {
                             Text("ตัวอย่าง:\nTH123456789 สมชาย ใจดี 0812345678 123/4 ม.2 ต.ป่าแดด COD 250\nKEX987654321 สมศรี บุญมี 0897654321 45/1 ม.1 ต.ริมปิง 150 บาท")
                         },
-                        shape = RoundedCornerShape(10.dp)
+                        shape = RoundedCornerShape(12.dp)
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))

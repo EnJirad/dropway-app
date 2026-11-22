@@ -1,16 +1,13 @@
 package com.pocketdev.dropway.ui.components
 
 import android.annotation.SuppressLint
-import android.content.Context
-import android.content.Intent
-import android.net.Uri
+import android.net.http.SslError
 import android.webkit.JavascriptInterface
+import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -31,7 +28,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.pocketdev.dropway.R
-import com.pocketdev.dropway.core.model.Parcel
 import com.pocketdev.dropway.core.util.LocationUtils
 import com.pocketdev.dropway.ui.theme.*
 import org.json.JSONArray
@@ -39,8 +35,8 @@ import org.json.JSONObject
 import java.util.Locale
 
 enum class DropwayMapType {
-    STREET,     // Road & street map (CartoDB / OpenStreetMap)
-    SATELLITE   // High-resolution satellite imagery (Esri World Imagery)
+    STREET,     // Road & street map (Google Road / OpenStreetMap)
+    SATELLITE   // High-resolution satellite imagery (Google Hybrid / Esri)
 }
 
 data class MapMarkerItem(
@@ -89,139 +85,12 @@ fun DropwayMapView(
         @JavascriptInterface
         fun onMapLoaded() {
             isMapReady = true
+            if (currentMapType == DropwayMapType.SATELLITE) {
+                webViewRef?.post {
+                    webViewRef?.evaluateJavascript("switchLayer('satellite')", null)
+                }
+            }
         }
-    }
-
-    val htmlTemplate = remember {
-        """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8" />
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-            <style>
-                html, body, #map { width: 100%; height: 100%; margin: 0; padding: 0; background: #e5ece7; }
-                .leaflet-control-attribution, .leaflet-control-zoom { display: none !important; }
-                .custom-pin {
-                    width: 28px; height: 28px; border-radius: 50%; border: 3px solid #ffffff;
-                    box-shadow: 0 3px 6px rgba(0,0,0,0.35); text-align: center; font-weight: bold;
-                    display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;
-                }
-                .pin-delivered { background: #059669; }
-                .pin-cod { background: #d97706; }
-                .pin-pending { background: #0284c7; }
-            </style>
-        </head>
-        <body>
-            <div id="map"></div>
-            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-            <script>
-                var map;
-                var streetLayer, satelliteLayer, labelLayer;
-                var currentMarkers = [];
-                var isPicker = $isPickerMode;
-
-                function initMap() {
-                    // Street Layer: CartoDB Voyager (clean streets with Thai labels)
-                    streetLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-                        maxZoom: 19,
-                        subdomains: 'abcd'
-                    });
-
-                    // Satellite Layer: Esri World Imagery (high-res true satellite photo)
-                    satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                        maxZoom: 19
-                    });
-
-                    // Transparent street/place labels overlay for satellite
-                    labelLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-                        maxZoom: 19
-                    });
-
-                    map = L.map('map', {
-                        center: [$initialLat, $initialLng],
-                        zoom: $initialZoom,
-                        zoomControl: false,
-                        layers: [streetLayer]
-                    });
-
-                    if (isPicker) {
-                        map.on('move', function() {
-                            var center = map.getCenter();
-                            if (window.AndroidBridge) {
-                                AndroidBridge.onCenterMoved(center.lat, center.lng);
-                            }
-                        });
-                        map.on('moveend', function() {
-                            var center = map.getCenter();
-                            if (window.AndroidBridge) {
-                                AndroidBridge.onCenterMoved(center.lat, center.lng);
-                            }
-                        });
-                    }
-
-                    if (window.AndroidBridge) {
-                        AndroidBridge.onMapLoaded();
-                    }
-                }
-
-                function switchLayer(type) {
-                    if (!map) return;
-                    if (type === 'satellite') {
-                        map.removeLayer(streetLayer);
-                        map.addLayer(satelliteLayer);
-                        map.addLayer(labelLayer);
-                    } else {
-                        map.removeLayer(satelliteLayer);
-                        map.removeLayer(labelLayer);
-                        map.addLayer(streetLayer);
-                    }
-                }
-
-                function setMapView(lat, lng, zoom) {
-                    if (!map) return;
-                    map.setView([lat, lng], zoom || map.getZoom(), { animate: true });
-                }
-
-                function zoomIn() { if (map) map.zoomIn(); }
-                function zoomOut() { if (map) map.zoomOut(); }
-
-                function updateMarkers(markersJson) {
-                    if (!map) return;
-                    // Clear existing markers
-                    for (var i = 0; i < currentMarkers.length; i++) {
-                        map.removeLayer(currentMarkers[i]);
-                    }
-                    currentMarkers = [];
-
-                    var data = JSON.parse(markersJson);
-                    for (var j = 0; j < data.length; j++) {
-                        var m = data[j];
-                        var cls = m.status === 'DELIVERED' ? 'pin-delivered' : (m.status === 'COD' ? 'pin-cod' : 'pin-pending');
-                        var icon = L.divIcon({
-                            className: '',
-                            html: '<div class="custom-pin ' + cls + '">' + (j + 1) + '</div>',
-                            iconSize: [28, 28],
-                            iconAnchor: [14, 14]
-                        });
-                        var marker = L.marker([m.latitude, m.longitude], { icon: icon, id: m.id }).addTo(map);
-                        marker.on('click', (function(id) {
-                            return function() {
-                                if (window.AndroidBridge) {
-                                    AndroidBridge.onMarkerSelected(String(id));
-                                }
-                            };
-                        })(m.id));
-                        currentMarkers.push(marker);
-                    }
-                }
-
-                document.addEventListener('DOMContentLoaded', initMap);
-            </script>
-        </body>
-        </html>
-        """.trimIndent()
     }
 
     // Update markers when list changes
@@ -252,15 +121,37 @@ fun DropwayMapView(
         AndroidView(
             factory = { ctx ->
                 WebView(ctx).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.loadWithOverviewMode = true
-                    settings.useWideViewPort = true
-                    settings.setSupportZoom(false)
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        databaseEnabled = true
+                        allowFileAccess = true
+                        allowContentAccess = true
+                        allowFileAccessFromFileURLs = true
+                        allowUniversalAccessFromFileURLs = true
+                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                        loadWithOverviewMode = true
+                        useWideViewPort = true
+                        setSupportZoom(false)
+                        cacheMode = WebSettings.LOAD_DEFAULT
+                        userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                    }
                     webChromeClient = WebChromeClient()
-                    webViewClient = object : WebViewClient() {}
+                    webViewClient = object : WebViewClient() {
+                        override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+                            handler?.proceed() // Ensure tile servers load reliably across all Android networks
+                        }
+
+                        override fun onPageFinished(view: WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            view?.evaluateJavascript(
+                                "initMap($initialLat, $initialLng, $initialZoom, $isPickerMode)",
+                                null
+                            )
+                        }
+                    }
                     addJavascriptInterface(AndroidMapBridge(), "AndroidBridge")
-                    loadDataWithBaseURL("https://unpkg.com", htmlTemplate, "text/html", "UTF-8", null)
+                    loadUrl("file:///android_asset/map.html")
                     webViewRef = this
                 }
             },
@@ -414,8 +305,6 @@ fun DropwayMapView(
                 iconRes = R.drawable.ic_my_location,
                 contentDescription = "ตำแหน่งปัจจุบัน",
                 onClick = {
-                    val loc = LocationUtils.calculateDistanceMeters(0.0, 0.0, 0.0, 0.0) // ping
-                    // Center to current location or default
                     webViewRef?.evaluateJavascript("setMapView(18.788300, 98.985300, 16)", null)
                 }
             )

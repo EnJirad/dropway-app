@@ -26,6 +26,7 @@ import com.pocketdev.dropway.core.model.Household
 import com.pocketdev.dropway.core.model.Resident
 import com.pocketdev.dropway.core.util.LocationUtils
 import com.pocketdev.dropway.core.util.PhoneUtils
+import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
 import com.pocketdev.dropway.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -471,7 +472,7 @@ fun AddEditResidentDialog(
                 }
                 Spacer(modifier = Modifier.height(14.dp))
 
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = fullName,
                     onValueChange = { fullName = it; error = null },
                     label = { Text("ชื่อ-นามสกุล *") },
@@ -480,7 +481,7 @@ fun AddEditResidentDialog(
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = phoneNumber,
                     onValueChange = { phoneNumber = it },
                     label = { Text("เบอร์โทรศัพท์") },
@@ -490,7 +491,7 @@ fun AddEditResidentDialog(
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
                     label = { Text("หมายเหตุ (เช่น แม่, ลูกสาว, คุณตา)") },

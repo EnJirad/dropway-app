@@ -16,6 +16,7 @@ import com.pocketdev.dropway.core.model.Parcel
 import com.pocketdev.dropway.core.model.PaymentMethod
 import com.pocketdev.dropway.core.model.PaymentStatus
 import com.pocketdev.dropway.core.util.MoneyUtils
+import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
 import com.pocketdev.dropway.ui.theme.DropwayPrimary
 import com.pocketdev.dropway.ui.theme.StatusDelivered
 import com.pocketdev.dropway.ui.theme.TextPrimary
@@ -61,7 +62,7 @@ fun RecordPaymentDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
                 // Amount Field
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = amountStr,
                     onValueChange = { amountStr = it; error = null },
                     label = { Text("จำนวนเงินที่ได้รับ (บาท) *") },
@@ -87,7 +88,7 @@ fun RecordPaymentDialog(
 
                 if (selectedMethod == PaymentMethod.TRANSFER || selectedMethod == PaymentMethod.QR) {
                     Spacer(modifier = Modifier.height(10.dp))
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = reference,
                         onValueChange = { reference = it },
                         label = { Text("เลขอ้างอิงสลิป / สลิปโอนเงิน (หากมี)") },
@@ -97,7 +98,7 @@ fun RecordPaymentDialog(
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = note,
                     onValueChange = { note = it },
                     label = { Text("บันทึกช่วยจำ (Note)") },

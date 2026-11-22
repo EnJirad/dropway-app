@@ -27,6 +27,7 @@ import androidx.core.content.ContextCompat
 import com.pocketdev.dropway.R
 import com.pocketdev.dropway.core.util.LocationUtils
 import com.pocketdev.dropway.ui.components.DropwayMapView
+import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
 import com.pocketdev.dropway.ui.theme.*
 import java.util.Locale
 
@@ -199,23 +200,23 @@ fun LocationPickerScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = latText,
                         onValueChange = {
                             latText = it
                             it.toDoubleOrNull()?.let { v -> centerLat = v }
                         },
-                        label = { Text("ละติจูด", fontWeight = FontWeight.SemiBold) },
+                        label = { Text("ละติจูด", fontWeight = FontWeight.Bold) },
                         modifier = Modifier.weight(1f),
                         singleLine = true
                     )
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = lngText,
                         onValueChange = {
                             lngText = it
                             it.toDoubleOrNull()?.let { v -> centerLng = v }
                         },
-                        label = { Text("ลองจิจูด", fontWeight = FontWeight.SemiBold) },
+                        label = { Text("ลองจิจูด", fontWeight = FontWeight.Bold) },
                         modifier = Modifier.weight(1f),
                         singleLine = true
                     )

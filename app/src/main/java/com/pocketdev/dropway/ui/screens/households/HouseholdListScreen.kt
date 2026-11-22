@@ -1,5 +1,6 @@
 package com.pocketdev.dropway.ui.screens.households
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -21,6 +22,7 @@ import com.pocketdev.dropway.DropwayApplication
 import com.pocketdev.dropway.R
 import com.pocketdev.dropway.core.model.Household
 import com.pocketdev.dropway.core.util.LocationUtils
+import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
 import com.pocketdev.dropway.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -38,6 +40,7 @@ fun HouseholdListScreen(
     var households by remember { mutableStateOf<List<Household>>(emptyList()) }
     var showAddDialog by remember { mutableStateOf(false) }
     var editingHousehold by remember { mutableStateOf<Household?>(null) }
+    var quickAddHousehold by remember { mutableStateOf<Household?>(null) }
 
     LaunchedEffect(searchQuery, selectedVillageFilter) {
         households = repository.searchHouseholds(searchQuery, selectedVillageFilter)
@@ -59,7 +62,7 @@ fun HouseholdListScreen(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 12.dp)
+                    modifier = Modifier.padding(horizontal = 14.dp)
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_add),
@@ -78,14 +81,14 @@ fun HouseholdListScreen(
                 .padding(padding)
                 .background(DropwayBackground)
         ) {
-            // Search Input
+            // Search Input with High-Contrast Bold Text
             Surface(
                 color = Color.White,
                 shadowElevation = 2.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         modifier = Modifier.fillMaxWidth(),
@@ -95,7 +98,7 @@ fun HouseholdListScreen(
                             Icon(
                                 painter = painterResource(id = R.drawable.ic_search),
                                 contentDescription = null,
-                                tint = Color.Gray,
+                                tint = DropwayPrimary,
                                 modifier = Modifier.size(18.dp)
                             )
                         },
@@ -105,7 +108,7 @@ fun HouseholdListScreen(
                                     Icon(
                                         painter = painterResource(id = R.drawable.ic_close),
                                         contentDescription = "ล้างการค้นหา",
-                                        tint = Color.Gray,
+                                        tint = Color(0xFF475569),
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
@@ -178,6 +181,7 @@ fun HouseholdListScreen(
                         HouseholdCard(
                             household = household,
                             onClick = { onHouseholdClick(household.id) },
+                            onQuickAdd = { quickAddHousehold = household },
                             onNavigate = {
                                 if (household.latitude != null && household.longitude != null) {
                                     LocationUtils.openNavigation(
@@ -195,6 +199,7 @@ fun HouseholdListScreen(
         }
     }
 
+    // Add / Edit Household Dialog
     if (showAddDialog) {
         AddEditHouseholdDialog(
             household = editingHousehold,
@@ -208,12 +213,24 @@ fun HouseholdListScreen(
             }
         )
     }
+
+    // Quick-Add Delivery Dialog (ปึ้งคือจบ)
+    if (quickAddHousehold != null) {
+        QuickAddDeliveryDialog(
+            household = quickAddHousehold!!,
+            onDismiss = { quickAddHousehold = null },
+            onSuccess = { message ->
+                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
 }
 
 @Composable
 fun HouseholdCard(
     household: Household,
     onClick: () -> Unit,
+    onQuickAdd: () -> Unit,
     onNavigate: () -> Unit
 ) {
     Surface(
@@ -256,53 +273,62 @@ fun HouseholdCard(
                     }
                 }
 
-                // GPS Indicator
-                if (household.latitude != null && household.longitude != null) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(StatusDeliveredBg)
-                            .clickable { onNavigate() }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                // Action Buttons on Right: Quick-Add (+) Button and GPS Indicator
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Quick-Add Button: "+" for instant parcel creation into today's deliveries
+                    Button(
+                        onClick = onQuickAdd,
+                        colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier.height(34.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_map_pin),
-                                contentDescription = null,
-                                tint = StatusDelivered,
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                "มีพิกัด GPS",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = StatusDelivered
-                            )
-                        }
-                    }
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(Color(0xFFF1F5F9))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            "ยังไม่มีพิกัด",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_add),
+                            contentDescription = "ส่งบ้านนี้",
+                            tint = Color.White,
+                            modifier = Modifier.size(15.dp)
                         )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "ส่งวันนี้",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+
+                    // GPS Indicator / Navigation Trigger
+                    if (household.latitude != null && household.longitude != null) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(StatusDeliveredBg)
+                                .clickable { onNavigate() }
+                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_navigation),
+                                    contentDescription = "นำทาง",
+                                    tint = StatusDelivered,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
 
             if (household.addressDescription.isNotBlank()) {
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = household.addressDescription,
                     fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
                     color = TextPrimary
                 )
             }
@@ -320,6 +346,7 @@ fun HouseholdCard(
                     Text(
                         text = household.notes,
                         fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
                         color = TextSecondary,
                         maxLines = 2
                     )

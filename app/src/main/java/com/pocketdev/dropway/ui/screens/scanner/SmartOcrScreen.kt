@@ -20,6 +20,7 @@ import com.pocketdev.dropway.core.util.MoneyUtils
 import com.pocketdev.dropway.core.util.PhoneUtils
 import com.pocketdev.dropway.core.util.SmartTextParser
 import com.pocketdev.dropway.core.util.TrackingUtils
+import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
 import com.pocketdev.dropway.ui.theme.DropwayPrimary
 import com.pocketdev.dropway.ui.theme.StatusDelivered
 import com.pocketdev.dropway.ui.theme.TextPrimary
@@ -68,7 +69,7 @@ fun SmartOcrScreen(
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = rawOcrText,
                     onValueChange = {
                         rawOcrText = it
@@ -80,7 +81,7 @@ fun SmartOcrScreen(
                     placeholder = {
                         Text("พิมพ์หรือวางข้อความที่สแกนได้จากฉลากพัสดุ...\n(เช่น TH0199887766 ผู้รับ: สมเกียรติ สว่างศรี โทร 086-123-4567 ที่อยู่ 88/2 ม.3 ต.สารภี เชียงใหม่ ยอด COD 420.-)")
                     },
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(12.dp)
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -121,7 +122,7 @@ fun SmartOcrScreen(
                     Text("ผลการแยกข้อมูล (ตรวจสอบและแก้ไขได้)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = trackingNumber,
                         onValueChange = { trackingNumber = it },
                         label = { Text("เลขพัสดุ (Tracking)") },
@@ -131,14 +132,14 @@ fun SmartOcrScreen(
 
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
+                        DropwayOutlinedTextField(
                             value = recipientName,
                             onValueChange = { recipientName = it },
                             label = { Text("ชื่อผู้รับ") },
                             modifier = Modifier.weight(1f),
                             singleLine = true
                         )
-                        OutlinedTextField(
+                        DropwayOutlinedTextField(
                             value = recipientPhone,
                             onValueChange = { recipientPhone = it },
                             label = { Text("เบอร์โทร") },
@@ -148,7 +149,7 @@ fun SmartOcrScreen(
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = address,
                         onValueChange = { address = it },
                         label = { Text("ที่อยู่จัดส่ง") },
@@ -156,7 +157,7 @@ fun SmartOcrScreen(
                     )
 
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = codAmountStr,
                         onValueChange = { codAmountStr = it },
                         label = { Text("ยอดเงิน COD (บาท)") },

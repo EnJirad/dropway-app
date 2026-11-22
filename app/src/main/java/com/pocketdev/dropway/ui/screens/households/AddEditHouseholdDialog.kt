@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.pocketdev.dropway.R
 import com.pocketdev.dropway.core.model.Household
+import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
 import com.pocketdev.dropway.ui.screens.navigation.LocationPickerScreen
 import com.pocketdev.dropway.ui.theme.DropwayPrimary
 import com.pocketdev.dropway.ui.theme.TextPrimary
@@ -84,16 +85,16 @@ fun AddEditHouseholdDialog(
                 }
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // House number & Village row
+                // House number & Village row (High contrast bold text)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = houseNumber,
                         onValueChange = { houseNumber = it; errorMessage = null },
                         label = { Text("บ้านเลขที่ *") },
                         modifier = Modifier.weight(1f),
                         singleLine = true
                     )
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = village,
                         onValueChange = { village = it },
                         label = { Text("หมู่ (ม.)") },
@@ -103,7 +104,7 @@ fun AddEditHouseholdDialog(
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = villageName,
                     onValueChange = { villageName = it },
                     label = { Text("ชื่อหมู่บ้าน / ชุมชน") },
@@ -113,14 +114,14 @@ fun AddEditHouseholdDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = subdistrict,
                         onValueChange = { subdistrict = it },
                         label = { Text("ตำบล") },
                         modifier = Modifier.weight(1f),
                         singleLine = true
                     )
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = district,
                         onValueChange = { district = it },
                         label = { Text("อำเภอ") },
@@ -131,14 +132,14 @@ fun AddEditHouseholdDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = province,
                         onValueChange = { province = it },
                         label = { Text("จังหวัด") },
                         modifier = Modifier.weight(1f),
                         singleLine = true
                     )
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = postalCode,
                         onValueChange = { postalCode = it },
                         label = { Text("รหัสไปรษณีย์") },
@@ -148,7 +149,7 @@ fun AddEditHouseholdDialog(
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = addressDescription,
                     onValueChange = { addressDescription = it },
                     label = { Text("จุดสังเกต / คำอธิบายที่อยู่") },
@@ -157,7 +158,7 @@ fun AddEditHouseholdDialog(
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = notes,
                     onValueChange = { notes = it },
                     label = { Text("โน้ตสำคัญของบ้านนี้") },
@@ -170,7 +171,7 @@ fun AddEditHouseholdDialog(
                 // Single Coordinate Field (ละติจูด,ลองจิจูด) with Trailing Map Icon Button
                 Text("พิกัดแผนที่ GPS", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextPrimary)
                 Spacer(modifier = Modifier.height(6.dp))
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = coordinateText,
                     onValueChange = { coordinateText = it },
                     label = { Text("พิกัด (ละติจูด,ลองจิจูด)") },
@@ -191,6 +192,7 @@ fun AddEditHouseholdDialog(
                 Text(
                     text = "กดไอคอนแผนที่เพื่อเลือกพิกัดโดยเลื่อนแผนที่ใต้หมุด",
                     fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = TextSecondary,
                     modifier = Modifier.padding(top = 4.dp, start = 4.dp)
                 )
@@ -200,7 +202,8 @@ fun AddEditHouseholdDialog(
                     Text(
                         text = errorMessage!!,
                         color = MaterialTheme.colorScheme.error,
-                        fontSize = 13.sp
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
 
@@ -210,7 +213,7 @@ fun AddEditHouseholdDialog(
                     horizontalArrangement = Arrangement.End
                 ) {
                     TextButton(onClick = onDismiss) {
-                        Text("ยกเลิก")
+                        Text("ยกเลิก", fontWeight = FontWeight.Bold)
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Button(
@@ -254,7 +257,7 @@ fun AddEditHouseholdDialog(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary)
                     ) {
-                        Text("บันทึก")
+                        Text("บันทึก", fontWeight = FontWeight.Bold)
                     }
                 }
             }

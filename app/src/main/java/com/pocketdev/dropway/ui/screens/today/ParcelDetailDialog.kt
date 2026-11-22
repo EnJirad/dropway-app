@@ -22,6 +22,7 @@ import com.pocketdev.dropway.core.model.PaymentStatus
 import com.pocketdev.dropway.core.util.MoneyUtils
 import com.pocketdev.dropway.core.util.PhoneUtils
 import com.pocketdev.dropway.core.util.TrackingUtils
+import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
 import com.pocketdev.dropway.ui.theme.DropwayPrimary
 import com.pocketdev.dropway.ui.theme.TextPrimary
 
@@ -73,7 +74,7 @@ fun ParcelDetailDialog(
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = trackingNumber,
                     onValueChange = { trackingNumber = it },
                     label = { Text("เลขพัสดุ (Tracking Number) *") },
@@ -83,14 +84,14 @@ fun ParcelDetailDialog(
 
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = recipientName,
                         onValueChange = { recipientName = it },
                         label = { Text("ชื่อผู้รับ *") },
                         modifier = Modifier.weight(1f),
                         singleLine = true
                     )
-                    OutlinedTextField(
+                    DropwayOutlinedTextField(
                         value = recipientPhone,
                         onValueChange = { recipientPhone = it },
                         label = { Text("เบอร์โทร") },
@@ -100,7 +101,7 @@ fun ParcelDetailDialog(
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = destinationAddress,
                     onValueChange = { destinationAddress = it },
                     label = { Text("ที่อยู่จัดส่ง") },
@@ -108,7 +109,7 @@ fun ParcelDetailDialog(
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = codAmountStr,
                     onValueChange = { codAmountStr = it },
                     label = { Text("ยอดเงิน COD (บาท)") },
@@ -117,7 +118,7 @@ fun ParcelDetailDialog(
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
-                OutlinedTextField(
+                DropwayOutlinedTextField(
                     value = deliveryNotes,
                     onValueChange = { deliveryNotes = it },
                     label = { Text("หมายเหตุการจัดส่ง") },

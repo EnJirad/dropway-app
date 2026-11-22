@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <link rel="stylesheet" href="leaflet.css" />
+    <script src="leaflet.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        html, body, #map {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            background-color: #1e293b;
+        }
+        /* Custom map loading grid */
+        .map-bg-grid {
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+            background-size: 32px 32px;
+        }
+        .leaflet-control-attribution, .leaflet-control-zoom {
+            display: none !important;
+        }
+        .custom-pin {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 3px solid #ffffff;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            font-weight: 900;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 13px;
+            font-family: sans-serif;
+            transition: transform 0.2s;
+        }
+        .pin-delivered { background: #059669; }
+        .pin-cod { background: #d97706; }
+        .pin-pending { background: #0284c7; }
+    </style>
+</head>
+<body class="map-bg-grid">
+    <div id="map"></div>
+    <script>
+        var map = null;
+        var googleStreetLayer = null;
+        var googleSatLayer = null;
+        var esriSatLayer = null;
+        var osmLayer = null;
+        var currentMarkers = [];
+        var currentLayerType = 'street';
+
+        function initMap(lat, lng, zoom, isPicker) {
+            lat = lat || 18.7883;
+            lng = lng || 98.9853;
+            zoom = zoom || 16;
+
+            if (map) {
+                map.remove();
+                map = null;
+                googleStreetLayer = null;
+                googleSatLayer = null;
+                esriSatLayer = null;
+                osmLayer = null;
+                currentMarkers = [];
+            }
+
+            // 1. Google Road Map (Street View / ถนน): Thai labels, alleys, buildings
+            googleStreetLayer = L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+                subdomains: '0123',
+                maxZoom: 20
+            });
+
+            // 2. Google Hybrid Satellite (ดาวเทียม): High-res satellite imagery + road labels
+            googleSatLayer = L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+                subdomains: '0123',
+                maxZoom: 20
+            });
+
+            // Fallback layers for offline or network edge cases
+            esriSatLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19
+            });
+
+            osmLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19
+            });
+
+            // Fallback hooks
+            googleStreetLayer.on('tileerror', function() {
+                if (map && !map.hasLayer(osmLayer) && currentLayerType === 'street') {
+                    map.addLayer(osmLayer);
+                }
+            });
+
+            googleSatLayer.on('tileerror', function() {
+                if (map && !map.hasLayer(esriSatLayer) && currentLayerType === 'satellite') {
+                    map.addLayer(esriSatLayer);
+                }
+            });
+
+            var initialLayer = (currentLayerType === 'satellite') ? googleSatLayer : googleStreetLayer;
+
+            map = L.map('map', {
+                center: [lat, lng],
+                zoom: zoom,
+                zoomControl: false,
+                layers: [initialLayer]
+            });
+
+            if (isPicker) {
+                map.on('move', function() {
+                    var center = map.getCenter();
+                    if (window.AndroidBridge && window.AndroidBridge.onCenterMoved) {
+                        AndroidBridge.onCenterMoved(center.lat, center.lng);
+                    }
+                });
+                map.on('moveend', function() {
+                    var center = map.getCenter();
+                    if (window.AndroidBridge && window.AndroidBridge.onCenterMoved) {
+                        AndroidBridge.onCenterMoved(center.lat, center.lng);
+                    }
+                });
+            }
+
+            if (window.AndroidBridge && window.AndroidBridge.onMapLoaded) {
+                AndroidBridge.onMapLoaded();
+            }
+        }
+
+        function switchLayer(type) {
+            currentLayerType = type;
+            if (!map) return;
+            if (type === 'satellite') {
+                if (googleStreetLayer && map.hasLayer(googleStreetLayer)) map.removeLayer(googleStreetLayer);
+                if (osmLayer && map.hasLayer(osmLayer)) map.removeLayer(osmLayer);
+                if (googleSatLayer && !map.hasLayer(googleSatLayer)) map.addLayer(googleSatLayer);
+            } else {
+                if (googleSatLayer && map.hasLayer(googleSatLayer)) map.removeLayer(googleSatLayer);
+                if (esriSatLayer && map.hasLayer(esriSatLayer)) map.removeLayer(esriSatLayer);
+                if (googleStreetLayer && !map.hasLayer(googleStreetLayer)) map.addLayer(googleStreetLayer);
+            }
+        }
+
+        function setMapView(lat, lng, zoom) {
+            if (!map) return;
+            map.setView([lat, lng], zoom || map.getZoom(), { animate: true });
+        }
+
+        function zoomIn() { if (map) map.zoomIn(); }
+        function zoomOut() { if (map) map.zoomOut(); }
+
+        function updateMarkers(markersJson) {
+            if (!map) return;
+            for (var i = 0; i < currentMarkers.length; i++) {
+                map.removeLayer(currentMarkers[i]);
+            }
+            currentMarkers = [];
+
+            try {
+                var data = JSON.parse(markersJson);
+                for (var j = 0; j < data.length; j++) {
+                    var m = data[j];
+                    var cls = m.status === 'DELIVERED' ? 'pin-delivered' : (m.status === 'COD' ? 'pin-cod' : 'pin-pending');
+                    var icon = L.divIcon({
+                        className: '',
+                        html: '<div class="custom-pin ' + cls + '">' + (j + 1) + '</div>',
+                        iconSize: [32, 32],
+                        iconAnchor: [16, 16]
+                    });
+                    var marker = L.marker([m.latitude, m.longitude], { icon: icon }).addTo(map);
+                    marker.on('click', (function(id) {
+                        return function() {
+                            if (window.AndroidBridge && window.AndroidBridge.onMarkerSelected) {
+                                AndroidBridge.onMarkerSelected(String(id));
+                            }
+                        };
+                    })(m.id));
+                    currentMarkers.push(marker);
+                }
+            } catch (e) {
+                console.error("Error updating markers: " + e);
+            }
+        }
+    </script>
+</body>
+</html>
