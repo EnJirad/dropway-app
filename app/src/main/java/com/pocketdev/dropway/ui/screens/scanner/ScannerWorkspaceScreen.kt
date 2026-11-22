@@ -1,6 +1,8 @@
 package com.pocketdev.dropway.ui.screens.scanner
 
 import androidx.compose.foundation.background
+import com.pocketdev.dropway.R
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -22,11 +24,11 @@ import com.pocketdev.dropway.ui.theme.DropwayPrimary
 import com.pocketdev.dropway.ui.theme.StatusDelivered
 import kotlinx.coroutines.launch
 
-enum class ScanMode(val title: String, val icon: String) {
-    BARCODE("สแกนบาร์โค้ด", "📷"),
-    MANUAL("ป้อนเอง", "📝"),
-    BULK_IMPORT("วางข้อความ", "📋"),
-    LABEL_OCR("อ่านฉลาก OCR", "🔍")
+enum class ScanMode(val title: String, val iconRes: Int) {
+    BARCODE("สแกนบาร์โค้ด", R.drawable.ic_scan),
+    MANUAL("ป้อนเอง", R.drawable.ic_edit),
+    BULK_IMPORT("วางข้อความ", R.drawable.ic_document),
+    LABEL_OCR("อ่านฉลาก OCR", R.drawable.ic_camera)
 }
 
 @Composable
@@ -58,13 +60,13 @@ fun ScannerWorkspaceScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = "📥 เพิ่มพัสดุเข้างานวันนี้",
+                        text = "เพิ่มพัสดุเข้างานวันนี้",
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
                         fontSize = 17.sp
                     )
                     IconButton(onClick = onBack) {
-                        Text("✕", color = Color.White, fontSize = 18.sp)
+                        Icon(painter = painterResource(id = R.drawable.ic_close), contentDescription = "ปิด", tint = Color.White, modifier = Modifier.size(20.dp))
                     }
                 }
 
@@ -90,7 +92,12 @@ fun ScannerWorkspaceScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(mode.icon, fontSize = 13.sp)
+                                Icon(
+                                    painter = painterResource(id = mode.iconRes),
+                                    contentDescription = null,
+                                    tint = if (isSelected) Color.White else Color(0xFF94A3B8),
+                                    modifier = Modifier.size(15.dp)
+                                )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = mode.title,
@@ -142,7 +149,7 @@ fun BarcodeScanWorkspace(onParcelSaved: () -> Unit) {
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "📷 สแกนบาร์โค้ดต่อเนื่อง (Continuous Scan)",
+                    text = "สแกนบาร์โค้ดต่อเนื่อง (Continuous Scan)",
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp
                 )
@@ -182,14 +189,14 @@ fun BarcodeScanWorkspace(onParcelSaved: () -> Unit) {
                         if (norm.isBlank()) return@Button
 
                         if (scannedQueue.contains(norm)) {
-                            duplicateWarning = "⚠️ เลขพัสดุนี้อยู่ในคิวที่สแกนแล้ว"
+                            duplicateWarning = "เลขพัสดุนี้อยู่ในคิวที่สแกนแล้ว"
                             return@Button
                         }
 
                         scope.launch {
                             val isDup = deliveryRepo.isTrackingDuplicate(norm)
                             if (isDup) {
-                                duplicateWarning = "⚠️ เลขพัสดุนี้เคยถูกบันทึกในระบบแล้ว"
+                                duplicateWarning = "เลขพัสดุนี้เคยถูกบันทึกในระบบแล้ว"
                             } else {
                                 scannedQueue = scannedQueue + norm
                                 barcodeInput = ""
@@ -260,10 +267,11 @@ fun BarcodeScanWorkspace(onParcelSaved: () -> Unit) {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text("${idx + 1}. $track", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                                Text(
-                                    "✕",
-                                    color = Color(0xFF94A3B8),
-                                    modifier = Modifier.clickable {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_close),
+                                    contentDescription = "ลบ",
+                                    tint = Color(0xFF94A3B8),
+                                    modifier = Modifier.size(16.dp).clickable {
                                         scannedQueue = scannedQueue.filter { it != track }
                                     }
                                 )

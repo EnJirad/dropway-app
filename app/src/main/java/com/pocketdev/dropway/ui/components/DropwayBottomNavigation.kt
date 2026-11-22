@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -11,16 +12,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.pocketdev.dropway.R
 import com.pocketdev.dropway.ui.theme.DropwayPrimary
 
-enum class NavTab(val label: String, val icon: String) {
-    HOUSEHOLDS("คลังบ้าน", "🏡"),
-    SCANNER("สแกน", "📷"),
-    NAVIGATION("นำทาง", "🗺️"),
-    PROFILE("โปรไฟล์", "👤")
+enum class NavTab(val label: String, val iconRes: Int) {
+    HOUSEHOLDS("คลังบ้าน", R.drawable.ic_home),
+    SCANNER("สแกน", R.drawable.ic_camera),
+    NAVIGATION("นำทาง", R.drawable.ic_map),
+    PROFILE("โปรไฟล์", R.drawable.ic_person)
 }
 
 @Composable
@@ -49,9 +52,11 @@ fun DropwayBottomNavigation(
                         .clickable { onTabSelected(tab) }
                         .padding(horizontal = 14.dp, vertical = 6.dp)
                 ) {
-                    Text(
-                        text = tab.icon,
-                        fontSize = if (isSelected) 22.sp else 20.sp
+                    Icon(
+                        painter = painterResource(id = tab.iconRes),
+                        contentDescription = tab.label,
+                        tint = if (isSelected) DropwayPrimary else Color(0xFF64748B),
+                        modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(

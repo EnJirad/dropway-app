@@ -78,8 +78,15 @@ fun DropwayTopBar(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_package),
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "📦 งานวันนี้",
+                            text = "งานวันนี้",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             fontSize = 13.sp

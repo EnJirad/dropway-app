@@ -13,6 +13,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.res.painterResource
+import com.pocketdev.dropway.R
 import com.pocketdev.dropway.DropwayApplication
 import com.pocketdev.dropway.core.model.DeliveryStatus
 import com.pocketdev.dropway.core.model.Parcel
@@ -54,12 +56,21 @@ fun ParcelDetailDialog(
                     .padding(20.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Text(
-                    text = "📦 รายละเอียดพัสดุ",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = TextPrimary
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_package),
+                        contentDescription = null,
+                        tint = DropwayPrimary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "รายละเอียดพัสดุ",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = TextPrimary
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(14.dp))
                 OutlinedTextField(

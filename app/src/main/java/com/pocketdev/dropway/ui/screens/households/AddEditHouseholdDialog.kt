@@ -7,15 +7,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.pocketdev.dropway.R
 import com.pocketdev.dropway.core.model.Household
+import com.pocketdev.dropway.ui.screens.navigation.LocationPickerScreen
 import com.pocketdev.dropway.ui.theme.DropwayPrimary
 import com.pocketdev.dropway.ui.theme.TextPrimary
+import com.pocketdev.dropway.ui.theme.TextSecondary
+import java.util.Locale
 
 @Composable
 fun AddEditHouseholdDialog(
@@ -32,9 +38,16 @@ fun AddEditHouseholdDialog(
     var postalCode by remember { mutableStateOf(household?.postalCode ?: "") }
     var addressDescription by remember { mutableStateOf(household?.addressDescription ?: "") }
     var notes by remember { mutableStateOf(household?.notes ?: "") }
-    var latitudeStr by remember { mutableStateOf(household?.latitude?.toString() ?: "") }
-    var longitudeStr by remember { mutableStateOf(household?.longitude?.toString() ?: "") }
 
+    // Single coordinate string state (latitude,longitude)
+    var coordinateText by remember {
+        val initial = if (household?.latitude != null && household.longitude != null) {
+            String.format(Locale.US, "%.6f, %.6f", household.latitude, household.longitude)
+        } else ""
+        mutableStateOf(initial)
+    }
+
+    var showLocationPicker by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -50,12 +63,25 @@ fun AddEditHouseholdDialog(
                     .padding(20.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                Text(
-                    text = if (household == null) "🏡 เพิ่มข้อมูลบ้าน" else "✏️ แก้ไขข้อมูลบ้าน",
-                    fontWeight = FontWeight.Black,
-                    fontSize = 18.sp,
-                    color = TextPrimary
-                )
+                // Header with Vector Icon
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        painter = painterResource(id = if (household == null) R.drawable.ic_home else R.drawable.ic_edit),
+                        contentDescription = null,
+                        tint = DropwayPrimary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (household == null) "เพิ่มข้อมูลบ้าน" else "แก้ไขข้อมูลบ้าน",
+                        fontWeight = FontWeight.Black,
+                        fontSize = 18.sp,
+                        color = TextPrimary
+                    )
+                }
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // House number & Village row
@@ -139,25 +165,35 @@ fun AddEditHouseholdDialog(
                     placeholder = { Text("เช่น หมาดุ, ฝากข้างบ้านได้") }
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
-                Text("พิกัด GPS (หากมี)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Single Coordinate Field (ละติจูด,ลองจิจูด) with Trailing Map Icon Button
+                Text("พิกัดแผนที่ GPS", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextPrimary)
                 Spacer(modifier = Modifier.height(6.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = latitudeStr,
-                        onValueChange = { latitudeStr = it },
-                        label = { Text("Latitude") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-                    OutlinedTextField(
-                        value = longitudeStr,
-                        onValueChange = { longitudeStr = it },
-                        label = { Text("Longitude") },
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
-                    )
-                }
+                OutlinedTextField(
+                    value = coordinateText,
+                    onValueChange = { coordinateText = it },
+                    label = { Text("พิกัด (ละติจูด,ลองจิจูด)") },
+                    placeholder = { Text("เช่น 18.788300, 98.985300") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    trailingIcon = {
+                        IconButton(onClick = { showLocationPicker = true }) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_map),
+                                contentDescription = "เลือกจากแผนที่",
+                                tint = DropwayPrimary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                )
+                Text(
+                    text = "กดไอคอนแผนที่เพื่อเลือกพิกัดโดยเลื่อนแผนที่ใต้หมุด",
+                    fontSize = 11.sp,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                )
 
                 if (errorMessage != null) {
                     Spacer(modifier = Modifier.height(10.dp))
@@ -183,8 +219,23 @@ fun AddEditHouseholdDialog(
                                 errorMessage = "กรุณากรอกบ้านเลขที่"
                                 return@Button
                             }
-                            val lat = latitudeStr.trim().toDoubleOrNull()
-                            val lng = longitudeStr.trim().toDoubleOrNull()
+
+                            var lat: Double? = null
+                            var lng: Double? = null
+                            if (coordinateText.isNotBlank()) {
+                                val parts = coordinateText.split(",").map { it.trim() }
+                                if (parts.size >= 2) {
+                                    lat = parts[0].toDoubleOrNull()
+                                    lng = parts[1].toDoubleOrNull()
+                                    if (lat == null || lng == null) {
+                                        errorMessage = "รูปแบบพิกัดไม่ถูกต้อง (ตัวอย่าง: 18.788300, 98.985300)"
+                                        return@Button
+                                    }
+                                } else {
+                                    errorMessage = "กรุณาระบุพิกัดในรูปแบบ ละติจูด,ลองจิจูด"
+                                    return@Button
+                                }
+                            }
 
                             val result = (household ?: Household(houseNumber = "")).copy(
                                 houseNumber = houseNumber.trim(),
@@ -208,5 +259,20 @@ fun AddEditHouseholdDialog(
                 }
             }
         }
+    }
+
+    // Interactive Map Picker Dialog
+    if (showLocationPicker) {
+        val latParsed = coordinateText.split(",").getOrNull(0)?.trim()?.toDoubleOrNull() ?: household?.latitude
+        val lngParsed = coordinateText.split(",").getOrNull(1)?.trim()?.toDoubleOrNull() ?: household?.longitude
+        LocationPickerScreen(
+            initialLat = latParsed,
+            initialLng = lngParsed,
+            onDismiss = { showLocationPicker = false },
+            onCoordinatesConfirmed = { newLat, newLng ->
+                coordinateText = String.format(Locale.US, "%.6f, %.6f", newLat, newLng)
+                showLocationPicker = false
+            }
+        )
     }
 }

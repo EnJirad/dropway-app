@@ -54,7 +54,7 @@ fun ManualParcelEntryScreen(
             )
             if (match != null && match.confidenceScore >= 50) {
                 matchedHouseholdId = match.household.id
-                matchedHouseholdInfo = "🏡 ตรงกับบ้านเลขที่ ${match.household.houseNumber} (${match.matchReason})"
+                matchedHouseholdInfo = "ตรงกับบ้านเลขที่ ${match.household.houseNumber} (${match.matchReason})"
             } else {
                 matchedHouseholdId = null
                 matchedHouseholdInfo = null
@@ -76,7 +76,7 @@ fun ManualParcelEntryScreen(
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
                 Text(
-                    text = "📝 ป้อนข้อมูลพัสดุ (Manual Entry)",
+                    text = "ป้อนข้อมูลพัสดุ (Manual Entry)",
                     fontWeight = FontWeight.Bold,
                     fontSize = 17.sp,
                     color = TextPrimary
@@ -202,7 +202,7 @@ fun ManualParcelEntryScreen(
                             }
                             scope.launch {
                                 if (deliveryRepo.isTrackingDuplicate(track)) {
-                                    duplicateError = "⚠️ เลขพัสดุนี้เคยถูกบันทึกแล้ว"
+                                    duplicateError = "เลขพัสดุนี้เคยถูกบันทึกแล้ว"
                                     return@launch
                                 }
                                 val today = deliveryRepo.getOrCreateToday()
@@ -253,7 +253,7 @@ fun ManualParcelEntryScreen(
                             }
                             scope.launch {
                                 if (deliveryRepo.isTrackingDuplicate(track)) {
-                                    duplicateError = "⚠️ เลขพัสดุนี้เคยถูกบันทึกแล้ว"
+                                    duplicateError = "เลขพัสดุนี้เคยถูกบันทึกแล้ว"
                                     return@launch
                                 }
                                 val today = deliveryRepo.getOrCreateToday()

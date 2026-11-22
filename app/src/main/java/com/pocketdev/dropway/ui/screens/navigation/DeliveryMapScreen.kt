@@ -1,6 +1,8 @@
 package com.pocketdev.dropway.ui.screens.navigation
 
 import android.content.Context
+import com.pocketdev.dropway.R
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -70,7 +72,7 @@ fun DeliveryMapScreen(
                     .padding(16.dp)
             ) {
                 Text(
-                    text = "🗺️ นำทาง & จุดส่งวันนี้ (Map & Navigation)",
+                    text = "นำทาง & จุดส่งวันนี้ (Map & Navigation)",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     fontSize = 17.sp
@@ -123,7 +125,7 @@ fun DeliveryMapScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("📍", fontSize = 48.sp)
+                    Icon(painter = painterResource(id = R.drawable.ic_map_pin), contentDescription = null, tint = DropwayPrimary.copy(alpha = 0.35f), modifier = Modifier.size(56.dp))
                     Spacer(modifier = Modifier.height(8.dp))
                     Text("ไม่มีจุดส่งในเงื่อนไขที่เลือก", fontWeight = FontWeight.Bold, color = TextSecondary)
                 }
@@ -191,7 +193,7 @@ fun DeliveryDestinationCard(
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = if (hasGps) "📍 มีพิกัด GPS" else "⚠️ รอพิกัด",
+                            text = if (hasGps) "มีพิกัด GPS" else "รอพิกัด",
                             fontWeight = FontWeight.Bold,
                             fontSize = 11.sp,
                             color = if (hasGps) StatusDelivered else TextSecondary
@@ -210,7 +212,7 @@ fun DeliveryDestinationCard(
 
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "👤 ${parcel.recipientName} ${if (parcel.recipientPhone.isNotBlank()) "(${parcel.recipientPhone})" else ""}",
+                text = "${parcel.recipientName} ${if (parcel.recipientPhone.isNotBlank()) "(${parcel.recipientPhone})" else ""}",
                 fontWeight = FontWeight.Bold,
                 fontSize = 14.sp,
                 color = TextPrimary
@@ -219,7 +221,7 @@ fun DeliveryDestinationCard(
             if (parcel.destinationAddress.isNotBlank()) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "🏠 ${parcel.destinationAddress}",
+                    text = parcel.destinationAddress,
                     fontSize = 12.sp,
                     color = TextSecondary,
                     maxLines = 2
@@ -229,7 +231,7 @@ fun DeliveryDestinationCard(
             if (parcel.codAmountSatang > 0) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "💵 ยอด COD: ${MoneyUtils.formatBaht(parcel.codAmountSatang)} (${parcel.paymentStatus.label})",
+                    text = "ยอด COD: ${MoneyUtils.formatBaht(parcel.codAmountSatang)} (${parcel.paymentStatus.label})",
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFFB45309)
@@ -249,7 +251,7 @@ fun DeliveryDestinationCard(
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
-                        Text("🚗 เริ่มนำทาง (GPS)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) { Icon(painter = painterResource(id = R.drawable.ic_navigation), contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("เริ่มนำทาง (GPS)", fontWeight = FontWeight.Bold, fontSize = 12.sp) }
                     }
                 }
 
@@ -261,7 +263,7 @@ fun DeliveryDestinationCard(
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
-                        Text("✓ ส่งสำเร็จ", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) { Icon(painter = painterResource(id = R.drawable.ic_check), contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("ส่งสำเร็จ", fontWeight = FontWeight.Bold, fontSize = 12.sp) }
                     }
                 }
             }

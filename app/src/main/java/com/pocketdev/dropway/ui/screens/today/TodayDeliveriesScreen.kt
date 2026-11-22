@@ -1,6 +1,8 @@
 package com.pocketdev.dropway.ui.screens.today
 
 import android.content.Intent
+import com.pocketdev.dropway.R
+import androidx.compose.ui.res.painterResource
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -97,17 +99,21 @@ fun TodayDeliveriesScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "←",
-                            fontSize = 22.sp,
-                            color = Color.White,
-                            modifier = Modifier
-                                .clickable { onNavigateBack() }
-                                .padding(end = 12.dp)
-                        )
+                        IconButton(
+                            onClick = onNavigateBack,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_close),
+                                contentDescription = "กลับ",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text(
-                                text = "📦 งานวันนี้ (Today's Parcels)",
+                                text = "งานวันนี้ (Today's Parcels)",
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 17.sp
@@ -122,10 +128,10 @@ fun TodayDeliveriesScreen(
 
                     Row {
                         IconButton(onClick = onOpenMap) {
-                            Text("🗺️", fontSize = 18.sp)
+                            Icon(painter = painterResource(id = R.drawable.ic_map), contentDescription = "แผนที่", tint = Color.White, modifier = Modifier.size(20.dp))
                         }
                         IconButton(onClick = onOpenScanner) {
-                            Text("➕", fontSize = 18.sp)
+                            Icon(painter = painterResource(id = R.drawable.ic_add), contentDescription = "เพิ่มพัสดุ", tint = Color.White, modifier = Modifier.size(20.dp))
                         }
                     }
                 }
@@ -234,10 +240,10 @@ fun TodayDeliveriesScreen(
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("ค้นหาเลขพัสดุ, ชื่อ, เบอร์, ที่อยู่...") },
                         singleLine = true,
-                        leadingIcon = { Text("🔍", fontSize = 14.sp) },
+                        leadingIcon = { Icon(painter = painterResource(id = R.drawable.ic_search), contentDescription = null, tint = Color.Gray, modifier = Modifier.size(16.dp)) },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
-                                Text("✕", modifier = Modifier.clickable { searchQuery = "" })
+                                Icon(painter = painterResource(id = R.drawable.ic_close), contentDescription = "ล้าง", tint = Color.Gray, modifier = Modifier.size(16.dp).clickable { searchQuery = "" })
                             }
                         },
                         shape = RoundedCornerShape(10.dp)
@@ -279,7 +285,7 @@ fun TodayDeliveriesScreen(
                             contentPadding = PaddingValues(horizontal = 8.dp)
                         ) {
                             Text(
-                                text = if (groupByHousehold) "🏡 รวมตามบ้าน" else "📄 แยกรายชิ้น",
+                                text = if (groupByHousehold) "รวมตามบ้าน" else "แยกรายชิ้น",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = DropwayPrimary
@@ -296,7 +302,7 @@ fun TodayDeliveriesScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("📦", fontSize = 48.sp)
+                        Icon(painter = painterResource(id = R.drawable.ic_package), contentDescription = null, tint = DropwayPrimary.copy(alpha = 0.35f), modifier = Modifier.size(56.dp))
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = if (parcels.isEmpty()) "ยังไม่มีพัสดุสำหรับวันนี้" else "ไม่พบพัสดุตามเงื่อนไข",
@@ -470,7 +476,7 @@ fun ParcelCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "👤 ${parcel.recipientName}",
+                    text = parcel.recipientName,
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp,
                     color = TextPrimary
@@ -490,7 +496,7 @@ fun ParcelCard(
             if (parcel.destinationAddress.isNotBlank()) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "📍 ${parcel.destinationAddress}",
+                    text = parcel.destinationAddress,
                     fontSize = 12.sp,
                     color = TextSecondary,
                     maxLines = 2
@@ -510,7 +516,7 @@ fun ParcelCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("💵 COD: ", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFFB45309))
+                        Icon(painter = painterResource(id = R.drawable.ic_money), contentDescription = null, tint = Color(0xFFB45309), modifier = Modifier.size(16.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("COD: ", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFFB45309))
                         Text(
                             text = MoneyUtils.formatBaht(parcel.codAmountSatang),
                             fontWeight = FontWeight.Black,
@@ -536,7 +542,7 @@ fun ParcelCard(
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
-                        Text("✓ ส่งแล้ว", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Icon(painter = painterResource(id = R.drawable.ic_check), contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("ส่งแล้ว", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
 
@@ -548,7 +554,7 @@ fun ParcelCard(
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(vertical = 8.dp)
                     ) {
-                        Text("💵 เก็บเงิน", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Icon(painter = painterResource(id = R.drawable.ic_money), contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("เก็บเงิน", fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     }
                 }
 
@@ -558,7 +564,7 @@ fun ParcelCard(
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                     ) {
-                        Text("📞", fontSize = 14.sp)
+                        Icon(painter = painterResource(id = R.drawable.ic_phone), contentDescription = "โทร", tint = DropwayPrimary, modifier = Modifier.size(16.dp))
                     }
                 }
 
@@ -568,7 +574,7 @@ fun ParcelCard(
                         shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                     ) {
-                        Text("🚗", fontSize = 14.sp)
+                        Icon(painter = painterResource(id = R.drawable.ic_navigation), contentDescription = "นำทาง", tint = DropwayPrimary, modifier = Modifier.size(16.dp))
                     }
                 }
             }
@@ -609,7 +615,7 @@ fun HouseholdParcelGroupCard(
                             .background(DropwayNavy)
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
-                        Text("🏡 จุดส่งเดียว", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                        Row(verticalAlignment = Alignment.CenterVertically) { Icon(painter = painterResource(id = R.drawable.ic_home), contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp)); Spacer(modifier = Modifier.width(4.dp)); Text("จุดส่งเดียว", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 11.sp) }
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -625,7 +631,7 @@ fun HouseholdParcelGroupCard(
                         onClick = { onNavigate(first.latitude, first.longitude) },
                         modifier = Modifier.size(32.dp)
                     ) {
-                        Text("🚗", fontSize = 16.sp)
+                        Icon(painter = painterResource(id = R.drawable.ic_navigation), contentDescription = "นำทาง", tint = DropwayPrimary, modifier = Modifier.size(18.dp))
                     }
                 }
             }
@@ -691,7 +697,7 @@ fun HouseholdParcelGroupCard(
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                 shape = RoundedCornerShape(6.dp)
                             ) {
-                                Text("✓", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Icon(painter = painterResource(id = R.drawable.ic_check), contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
                             }
                         }
                     }

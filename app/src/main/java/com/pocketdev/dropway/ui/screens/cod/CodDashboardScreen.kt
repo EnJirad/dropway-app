@@ -1,6 +1,8 @@
 package com.pocketdev.dropway.ui.screens.cod
 
 import androidx.compose.foundation.background
+import com.pocketdev.dropway.R
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -55,7 +57,7 @@ fun CodDashboardScreen() {
                     .padding(16.dp)
             ) {
                 Text(
-                    text = "💰 บัญชีเงินเก็บปลายทาง (COD Tracker)",
+                    text = "บัญชีเงินเก็บปลายทาง (COD Tracker)",
                     color = Color.White,
                     fontWeight = FontWeight.Bold,
                     fontSize = 17.sp
@@ -105,14 +107,14 @@ fun CodDashboardScreen() {
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("💵 เงินสดที่ได้รับ: ${MoneyUtils.formatBaht(codSummary.cashCollectedSatang)}", color = Color(0xFF10B981), fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            Text("📲 โอนเงินแล้ว: ${MoneyUtils.formatBaht(codSummary.transferCollectedSatang)}", color = Color(0xFF38BDF8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("เงินสดที่ได้รับ: ${MoneyUtils.formatBaht(codSummary.cashCollectedSatang)}", color = Color(0xFF10B981), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("โอนเงินแล้ว: ${MoneyUtils.formatBaht(codSummary.transferCollectedSatang)}", color = Color(0xFF38BDF8), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }
 
                         if (codSummary.previousDayOutstandingSatang > 0) {
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                "⚠️ ยอดยกมาจากวันก่อนหน้า: ${MoneyUtils.formatBaht(codSummary.previousDayOutstandingSatang)}",
+                                "ยอดยกมาจากวันก่อนหน้า: ${MoneyUtils.formatBaht(codSummary.previousDayOutstandingSatang)}",
                                 color = Color(0xFFFBBF24),
                                 fontSize = 11.sp
                             )
@@ -125,7 +127,7 @@ fun CodDashboardScreen() {
         // Outstanding List
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "📋 รายการที่ต้องติดตามเงิน (${outstandingParcels.size} ชิ้น)",
+                text = "รายการที่ต้องติดตามเงิน (${outstandingParcels.size} ชิ้น)",
                 fontWeight = FontWeight.Bold,
                 fontSize = 15.sp,
                 color = TextPrimary
@@ -138,7 +140,7 @@ fun CodDashboardScreen() {
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("🎉", fontSize = 48.sp)
+                        Icon(painter = painterResource(id = R.drawable.ic_check), contentDescription = null, tint = StatusDelivered, modifier = Modifier.size(48.dp))
                         Spacer(modifier = Modifier.height(8.dp))
                         Text("ไม่มีพัสดุค้างชำระ COD", fontWeight = FontWeight.Bold, color = StatusDelivered)
                     }

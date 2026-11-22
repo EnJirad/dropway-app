@@ -1,6 +1,8 @@
 package com.pocketdev.dropway.ui.screens.scanner
 
 import androidx.compose.foundation.background
+import com.pocketdev.dropway.R
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -59,7 +61,7 @@ fun SmartImportScreen(
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text = "📋 นำเข้าข้อมูลแบบรวดเร็ว (Smart Import / Bulk Paste)",
+                        text = "นำเข้าข้อมูลแบบรวดเร็ว (Smart Import / Bulk Paste)",
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp,
                         color = TextPrimary
@@ -113,7 +115,7 @@ fun SmartImportScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary),
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text("วิเคราะห์ข้อความ 🚀", fontWeight = FontWeight.Bold)
+                            Text("วิเคราะห์ข้อความ", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -138,7 +140,7 @@ fun SmartImportScreen(
                     ) {
                         Column {
                             Text(
-                                text = "🔍 ตรวจสอบรายการนำเข้า (${parsedRows.size} ชิ้น)",
+                                text = "ตรวจสอบรายการนำเข้า (${parsedRows.size} ชิ้น)",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp
                             )
@@ -201,7 +203,7 @@ fun SmartImportScreen(
                         contentPadding = PaddingValues(vertical = 12.dp)
                     ) {
                         Text(
-                            text = "✓ ยืนยันบันทึกพัสดุทั้งหมด ($validCount ชิ้น)",
+                            text = "ยืนยันบันทึกพัสดุทั้งหมด ($validCount ชิ้น)",
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp
                         )
@@ -250,18 +252,18 @@ fun ParsedRowCard(
                             modifier = Modifier.padding(end = 8.dp)
                         )
                     }
-                    Text(
-                        "✕",
-                        fontSize = 14.sp,
-                        color = Color(0xFF94A3B8),
-                        modifier = Modifier.clickable { onDelete() }
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_close),
+                        contentDescription = "ลบ",
+                        tint = Color(0xFF94A3B8),
+                        modifier = Modifier.size(16.dp).clickable { onDelete() }
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "👤 ${row.recipientName.ifBlank { "-" }} • 📞 ${row.recipientPhone.ifBlank { "-" }}",
+                text = "${row.recipientName.ifBlank { "-" }} • โทร: ${row.recipientPhone.ifBlank { "-" }}",
                 fontSize = 12.sp,
                 color = TextPrimary
             )
@@ -269,7 +271,7 @@ fun ParsedRowCard(
             if (row.address.isNotBlank()) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "📍 ${row.address}",
+                    text = row.address,
                     fontSize = 11.sp,
                     color = TextSecondary,
                     maxLines = 2

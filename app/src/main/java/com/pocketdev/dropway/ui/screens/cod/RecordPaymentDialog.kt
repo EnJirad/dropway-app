@@ -46,7 +46,7 @@ fun RecordPaymentDialog(
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
                 Text(
-                    text = "💵 บันทึกการรับเงิน COD",
+                    text = "บันทึกการรับเงิน COD",
                     fontWeight = FontWeight.Bold,
                     fontSize = 17.sp,
                     color = TextPrimary
@@ -153,7 +153,7 @@ fun RecordPaymentDialog(
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(vertical = 4.dp)
                     ) {
-                        Text("รับเงินแล้ว ✓", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("รับเงินแล้ว", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

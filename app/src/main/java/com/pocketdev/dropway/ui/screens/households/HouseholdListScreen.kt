@@ -13,14 +13,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.pocketdev.dropway.DropwayApplication
+import com.pocketdev.dropway.R
 import com.pocketdev.dropway.core.model.Household
-import com.pocketdev.dropway.core.model.Resident
 import com.pocketdev.dropway.core.util.LocationUtils
-import com.pocketdev.dropway.core.util.PhoneUtils
 import com.pocketdev.dropway.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -57,7 +57,18 @@ fun HouseholdListScreen(
                 containerColor = DropwayPrimary,
                 contentColor = Color.White
             ) {
-                Text("+ เพิ่มบ้าน", fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_add),
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("เพิ่มบ้าน", fontWeight = FontWeight.Bold)
+                }
             }
         }
     ) { padding ->
@@ -80,14 +91,24 @@ fun HouseholdListScreen(
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = { Text("ค้นหาบ้านเลขที่, ชื่อผู้รับ, เบอร์โทร, หมู่, โน้ต...") },
                         singleLine = true,
-                        leadingIcon = { Text("🔍", fontSize = 16.sp) },
+                        leadingIcon = {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_search),
+                                contentDescription = null,
+                                tint = Color.Gray,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
-                                Text(
-                                    "✕",
-                                    fontSize = 16.sp,
-                                    modifier = Modifier.clickable { searchQuery = "" }
-                                )
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_close),
+                                        contentDescription = "ล้างการค้นหา",
+                                        tint = Color.Gray,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                             }
                         },
                         shape = RoundedCornerShape(12.dp)
@@ -126,7 +147,12 @@ fun HouseholdListScreen(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("🏡", fontSize = 48.sp)
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_home),
+                            contentDescription = null,
+                            tint = DropwayPrimary.copy(alpha = 0.35f),
+                            modifier = Modifier.size(56.dp)
+                        )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
                             text = if (searchQuery.isEmpty()) "ยังไม่มีข้อมูลบ้านในคลัง" else "ไม่พบข้อมูลบ้านที่ค้นหา",
@@ -239,8 +265,13 @@ fun HouseholdCard(
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("📍", fontSize = 11.sp)
-                            Spacer(modifier = Modifier.width(2.dp))
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_map_pin),
+                                contentDescription = null,
+                                tint = StatusDelivered,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 "มีพิกัด GPS",
                                 fontSize = 11.sp,
@@ -275,13 +306,22 @@ fun HouseholdCard(
             }
 
             if (household.notes.isNotBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "📝 ${household.notes}",
-                    fontSize = 12.sp,
-                    color = TextSecondary,
-                    maxLines = 2
-                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_document),
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = household.notes,
+                        fontSize = 12.sp,
+                        color = TextSecondary,
+                        maxLines = 2
+                    )
+                }
             }
         }
     }

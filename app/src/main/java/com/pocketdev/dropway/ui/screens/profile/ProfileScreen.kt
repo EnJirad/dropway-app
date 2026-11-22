@@ -81,7 +81,7 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("💰 ยอดเงิน & บัญชี COD", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                    Text("ยอดเงิน & บัญชี COD", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         "ตรวจสอบยอดเงินสดที่ได้รับ โอนเงินแล้ว และรายการที่ต้องติดตาม",
@@ -95,7 +95,7 @@ fun ProfileScreen(
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("เปิดแดชบอร์ด COD Ledger 💵", fontWeight = FontWeight.Bold)
+                        Text("เปิดแดชบอร์ด COD Ledger", fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -110,7 +110,7 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("💾 ความปลอดภัยข้อมูล & สำรองข้อมูล", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                    Text("ความปลอดภัยข้อมูล & สำรองข้อมูล", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         "ข้อมูลทั้งหมดเก็บอยู่บนเครื่องของคุณแบบออฟไลน์ 100% สามารถส่งออก (Export) เป็นไฟล์สำรองได้ตลอดเวลา",
@@ -146,7 +146,7 @@ fun ProfileScreen(
                         shape = RoundedCornerShape(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("📤 ส่งออกข้อมูลสำรอง (Export JSON Backup)")
+                        Text("ส่งออกข้อมูลสำรอง (Export JSON Backup)")
                     }
 
                     if (exportMessage != null) {

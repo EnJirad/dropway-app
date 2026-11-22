@@ -55,7 +55,7 @@ fun SmartOcrScreen(
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    text = "🔍 อ่านฉลากพัสดุ (Smart Label OCR)",
+                    text = "อ่านฉลากพัสดุ (Smart Label OCR)",
                     fontWeight = FontWeight.Bold,
                     fontSize = 17.sp,
                     color = TextPrimary
@@ -111,7 +111,7 @@ fun SmartOcrScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Text("แยกข้อมูลฉลาก 🔍", fontWeight = FontWeight.Bold)
+                        Text("แยกข้อมูลฉลาก", fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -188,7 +188,7 @@ fun SmartOcrScreen(
                         shape = RoundedCornerShape(10.dp),
                         contentPadding = PaddingValues(vertical = 12.dp)
                     ) {
-                        Text("✓ บันทึกพัสดุนี้เข้างานวันนี้", fontWeight = FontWeight.Bold)
+                        Text("บันทึกพัสดุนี้เข้างานวันนี้", fontWeight = FontWeight.Bold)
                     }
                 }
             }

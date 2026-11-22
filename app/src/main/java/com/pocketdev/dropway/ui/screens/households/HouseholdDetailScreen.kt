@@ -15,11 +15,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.pocketdev.dropway.DropwayApplication
+import com.pocketdev.dropway.R
 import com.pocketdev.dropway.core.model.Household
 import com.pocketdev.dropway.core.model.Resident
 import com.pocketdev.dropway.core.util.LocationUtils
@@ -69,14 +71,18 @@ fun HouseholdDetailScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "←",
-                            fontSize = 22.sp,
-                            color = Color.White,
-                            modifier = Modifier
-                                .clickable { onBack() }
-                                .padding(end = 12.dp)
-                        )
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_close),
+                                contentDescription = "กลับ",
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
                         Column {
                             Text(
                                 text = "บ้านเลขที่ ${h.houseNumber}",
@@ -96,10 +102,20 @@ fun HouseholdDetailScreen(
 
                     Row {
                         IconButton(onClick = { showEditHouseholdDialog = true }) {
-                            Text("✏️", fontSize = 16.sp)
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_edit),
+                                contentDescription = "แก้ไข",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                         IconButton(onClick = { showDeleteConfirmDialog = true }) {
-                            Text("🗑️", fontSize = 16.sp)
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_delete),
+                                contentDescription = "ลบ",
+                                tint = Color(0xFFEF4444),
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
@@ -123,7 +139,21 @@ fun HouseholdDetailScreen(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text("📍 ที่อยู่และพิกัดนำทาง", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_map_pin),
+                                contentDescription = null,
+                                tint = DropwayPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "ที่อยู่และพิกัดนำทาง",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = TextPrimary
+                            )
+                        }
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(text = h.fullAddress(), fontSize = 14.sp, color = TextPrimary)
 
@@ -147,7 +177,16 @@ fun HouseholdDetailScreen(
                                 colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Text("🚗 เริ่มนำทางไปบ้านนี้", fontWeight = FontWeight.Bold)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_navigation),
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("เริ่มนำทางไปบ้านนี้", fontWeight = FontWeight.Bold)
+                                }
                             }
                         } else {
                             OutlinedButton(
@@ -155,7 +194,16 @@ fun HouseholdDetailScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(10.dp)
                             ) {
-                                Text("📍 เพิ่มพิกัด GPS", fontWeight = FontWeight.Medium)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_map_pin),
+                                        contentDescription = null,
+                                        tint = DropwayPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("เพิ่มพิกัด GPS", fontWeight = FontWeight.Medium)
+                                }
                             }
                         }
                     }
@@ -169,26 +217,45 @@ fun HouseholdDetailScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "👥 ผู้อยู่อาศัย (${residents.size} คน)",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = TextPrimary
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_people),
+                            contentDescription = null,
+                            tint = DropwayPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "ผู้อยู่อาศัย (${residents.size} คน)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = TextPrimary
+                        )
+                    }
                     Button(
                         onClick = {
                             editingResident = null
                             showAddResidentDialog = true
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary),
-                        shape = RoundedCornerShape(20.dp),
+                        shape = RoundedCornerShape(8.dp),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                     ) {
-                        Text("+ เพิ่มคน", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_add),
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("เพิ่มคน", fontSize = 12.sp)
+                        }
                     }
                 }
             }
 
+            // Residents list
             if (residents.isEmpty()) {
                 item {
                     Surface(
@@ -197,7 +264,11 @@ fun HouseholdDetailScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Box(modifier = Modifier.padding(24.dp), contentAlignment = Alignment.Center) {
-                            Text("ยังไม่มีรายชื่อผู้อยู่อาศัยในบ้านนี้", color = TextMuted, fontSize = 13.sp)
+                            Text(
+                                text = "ยังไม่มีรายชื่อผู้อยู่อาศัยในบ้านนี้",
+                                color = TextMuted,
+                                fontSize = 13.sp
+                            )
                         }
                     }
                 }
@@ -213,8 +284,8 @@ fun HouseholdDetailScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
@@ -250,7 +321,12 @@ fun HouseholdDetailScreen(
                                             context.startActivity(dialIntent)
                                         }
                                     ) {
-                                        Text("📞", fontSize = 18.sp)
+                                        Icon(
+                                            painter = painterResource(id = R.drawable.ic_phone),
+                                            contentDescription = "โทร",
+                                            tint = DropwayPrimary,
+                                            modifier = Modifier.size(20.dp)
+                                        )
                                     }
                                 }
                                 IconButton(
@@ -259,7 +335,12 @@ fun HouseholdDetailScreen(
                                         showAddResidentDialog = true
                                     }
                                 ) {
-                                    Text("✏️", fontSize = 14.sp)
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_edit),
+                                        contentDescription = "แก้ไข",
+                                        tint = Color.Gray,
+                                        modifier = Modifier.size(16.dp)
+                                    )
                                 }
                             }
                         }
@@ -273,9 +354,9 @@ fun HouseholdDetailScreen(
         AddEditHouseholdDialog(
             household = h,
             onDismiss = { showEditHouseholdDialog = false },
-            onSave = { updated ->
+            onSave = { saved ->
                 scope.launch {
-                    repository.saveHousehold(updated)
+                    repository.saveHousehold(saved)
                     household = repository.getHouseholdById(householdId)
                     showEditHouseholdDialog = false
                 }
@@ -308,8 +389,8 @@ fun HouseholdDetailScreen(
     if (showDeleteConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showDeleteConfirmDialog = false },
-            title = { Text("ยืนยันการลบข้อมูลบ้าน") },
-            text = { Text("คุณต้องการลบบ้านเลขที่ ${h.houseNumber} ใช่หรือไม่? รายชื่อผู้อยู่อาศัยทั้งหมดของบ้านนี้จะถูกลบด้วย") },
+            title = { Text("ยืนยันการลบข้อมูลบ้าน", fontWeight = FontWeight.Bold) },
+            text = { Text("คุณต้องการลบบ้านเลขที่ ${h.houseNumber} พร้อมข้อมูลผู้อยู่อาศัยทั้งหมดหรือไม่?") },
             confirmButton = {
                 Button(
                     onClick = {
@@ -353,12 +434,21 @@ fun AddEditResidentDialog(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(20.dp)) {
-                Text(
-                    text = if (resident == null) "👤 เพิ่มผู้อยู่อาศัย" else "✏️ แก้ไขผู้อยู่อาศัย",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp,
-                    color = TextPrimary
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(id = if (resident == null) R.drawable.ic_person else R.drawable.ic_edit),
+                        contentDescription = null,
+                        tint = DropwayPrimary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (resident == null) "เพิ่มผู้อยู่อาศัย" else "แก้ไขผู้อยู่อาศัย",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        color = TextPrimary
+                    )
+                }
                 Spacer(modifier = Modifier.height(14.dp))
 
                 OutlinedTextField(
