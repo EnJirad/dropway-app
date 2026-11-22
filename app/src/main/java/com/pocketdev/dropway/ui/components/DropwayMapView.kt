@@ -2,12 +2,18 @@ package com.pocketdev.dropway.ui.components
 
 import android.annotation.SuppressLint
 import android.net.http.SslError
+import android.os.Handler
+import android.os.Looper
+import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -35,7 +41,7 @@ import org.json.JSONObject
 import java.util.Locale
 
 enum class DropwayMapType {
-    STREET,     // Road & street map (Google Road / OpenStreetMap)
+    STREET,     // Road & street map (Google Road / OpenStreetMap / CartoDB)
     SATELLITE   // High-resolution satellite imagery (Google Hybrid / Esri)
 }
 
@@ -67,28 +73,45 @@ fun DropwayMapView(
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var isMapReady by remember { mutableStateOf(false) }
 
-    // Bridge for JS to Android communication
-    class AndroidMapBridge {
+    // Pre-load self-contained map html with inlined leaflet assets
+    val mapHtml = remember {
+        try {
+            context.assets.open("map.html").bufferedReader().use { it.readText() }
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    // Bridge for JS to Android communication (Dispatched to Main Thread)
+    class AndroidMapBridge(
+        private val onMoved: ((Double, Double) -> Unit)?,
+        private val onMarkerSelected: ((Long) -> Unit)?,
+        private val onLoaded: () -> Unit
+    ) {
+        private val mainHandler = Handler(Looper.getMainLooper())
+
         @JavascriptInterface
         fun onCenterMoved(lat: Double, lng: Double) {
-            currentLat = lat
-            currentLng = lng
-            onCoordinatesChanged?.invoke(lat, lng)
+            mainHandler.post {
+                currentLat = lat
+                currentLng = lng
+                onMoved?.invoke(lat, lng)
+            }
         }
 
         @JavascriptInterface
         fun onMarkerSelected(idStr: String) {
             val id = idStr.toLongOrNull() ?: return
-            onMarkerClick?.invoke(id)
+            mainHandler.post {
+                onMarkerSelected?.invoke(id)
+            }
         }
 
         @JavascriptInterface
         fun onMapLoaded() {
-            isMapReady = true
-            if (currentMapType == DropwayMapType.SATELLITE) {
-                webViewRef?.post {
-                    webViewRef?.evaluateJavascript("switchLayer('satellite')", null)
-                }
+            mainHandler.post {
+                isMapReady = true
+                onLoaded()
             }
         }
     }
@@ -107,7 +130,7 @@ fun DropwayMapView(
                 }
                 jsonArray.put(obj)
             }
-            webViewRef?.evaluateJavascript("updateMarkers('${jsonArray.toString().replace("'", "\\'")}')", null)
+            webViewRef?.evaluateJavascript("updateMarkers(${jsonArray.toString()})", null)
         }
     }
 
@@ -115,9 +138,9 @@ fun DropwayMapView(
         modifier = modifier
             .clip(RoundedCornerShape(18.dp))
             .border(1.5.dp, Color(0xFFCBD5E1), RoundedCornerShape(18.dp))
-            .background(Color(0xFFE2E8F0))
+            .background(Color(0xFFF1F5F9))
     ) {
-        // Map WebView
+        // Map WebView with HTTPS origin for tile access
         AndroidView(
             factory = { ctx ->
                 WebView(ctx).apply {
@@ -127,36 +150,108 @@ fun DropwayMapView(
                         databaseEnabled = true
                         allowFileAccess = true
                         allowContentAccess = true
-                        allowFileAccessFromFileURLs = true
-                        allowUniversalAccessFromFileURLs = true
-                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                         loadWithOverviewMode = true
                         useWideViewPort = true
                         setSupportZoom(false)
                         cacheMode = WebSettings.LOAD_DEFAULT
-                        userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+                        mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                     }
-                    webChromeClient = WebChromeClient()
+                    webChromeClient = object : WebChromeClient() {
+                        override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                            android.util.Log.d(
+                                "DropwayMap",
+                                "${consoleMessage?.messageLevel()}: ${consoleMessage?.message()} (${consoleMessage?.lineNumber()})"
+                            )
+                            return true
+                        }
+                    }
                     webViewClient = object : WebViewClient() {
                         override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
-                            handler?.proceed() // Ensure tile servers load reliably across all Android networks
+                            handler?.proceed() // Allow tile servers across all network types
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
+                            val layerStr = if (currentMapType == DropwayMapType.SATELLITE) "satellite" else "street"
                             view?.evaluateJavascript(
-                                "initMap($initialLat, $initialLng, $initialZoom, $isPickerMode)",
+                                "setupMap($initialLat, $initialLng, $initialZoom, $isPickerMode, '$layerStr')",
                                 null
                             )
                         }
                     }
-                    addJavascriptInterface(AndroidMapBridge(), "AndroidBridge")
-                    loadUrl("file:///android_asset/map.html")
+                    addJavascriptInterface(
+                        AndroidMapBridge(
+                            onMoved = { lat, lng ->
+                                currentLat = lat
+                                currentLng = lng
+                                onCoordinatesChanged?.invoke(lat, lng)
+                            },
+                            onMarkerSelected = onMarkerClick,
+                            onLoaded = {
+                                isMapReady = true
+                                if (!isPickerMode && markers.isNotEmpty()) {
+                                    val jsonArray = JSONArray()
+                                    markers.forEach { item ->
+                                        val obj = JSONObject().apply {
+                                            put("id", item.id)
+                                            put("latitude", item.latitude)
+                                            put("longitude", item.longitude)
+                                            put("title", item.title)
+                                            put("status", item.status)
+                                        }
+                                        jsonArray.put(obj)
+                                    }
+                                    evaluateJavascript("updateMarkers(${jsonArray.toString()})", null)
+                                }
+                            }
+                        ),
+                        "AndroidBridge"
+                    )
+
+                    // Load self-contained HTML with https:// base URL for unrestricted HTTPS tile loading
+                    loadDataWithBaseURL("https://dropway.app", mapHtml, "text/html", "UTF-8", null)
                     webViewRef = this
+                }
+            },
+            update = { webView ->
+                if (isMapReady) {
+                    webView.evaluateJavascript("setMapView($initialLat, $initialLng, $initialZoom)", null)
                 }
             },
             modifier = Modifier.fillMaxSize()
         )
+
+        // Loading overlay until map engine signals loaded
+        AnimatedVisibility(
+            visible = !isMapReady,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.Center)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = DropwayNavy.copy(alpha = 0.88f),
+                shadowElevation = 6.dp
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        modifier = Modifier.size(16.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "กำลังเปิดแผนที่...",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
 
         // FIXED CENTER PIN (Only in Picker Mode)
         if (isPickerMode) {
@@ -194,7 +289,7 @@ fun DropwayMapView(
             shape = RoundedCornerShape(30.dp),
             color = Color.White,
             shadowElevation = 6.dp,
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1))
         ) {
             Row(
                 modifier = Modifier.padding(4.dp),
@@ -216,7 +311,7 @@ fun DropwayMapView(
                         Icon(
                             painter = painterResource(id = R.drawable.ic_map),
                             contentDescription = null,
-                            tint = if (currentMapType == DropwayMapType.STREET) Color.White else Color(0xFF1E293B),
+                            tint = if (currentMapType == DropwayMapType.STREET) Color.White else Color(0xFF0F172A),
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -224,7 +319,7 @@ fun DropwayMapView(
                             text = "ถนน",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (currentMapType == DropwayMapType.STREET) Color.White else Color(0xFF1E293B)
+                            color = if (currentMapType == DropwayMapType.STREET) Color.White else Color(0xFF0F172A)
                         )
                     }
                 }
@@ -245,7 +340,7 @@ fun DropwayMapView(
                         Icon(
                             painter = painterResource(id = R.drawable.ic_satellite),
                             contentDescription = null,
-                            tint = if (currentMapType == DropwayMapType.SATELLITE) Color.White else Color(0xFF1E293B),
+                            tint = if (currentMapType == DropwayMapType.SATELLITE) Color.White else Color(0xFF0F172A),
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
@@ -253,7 +348,7 @@ fun DropwayMapView(
                             text = "ดาวเทียม",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (currentMapType == DropwayMapType.SATELLITE) Color.White else Color(0xFF1E293B)
+                            color = if (currentMapType == DropwayMapType.SATELLITE) Color.White else Color(0xFF0F172A)
                         )
                     }
                 }
@@ -278,7 +373,7 @@ fun DropwayMapView(
             )
         }
 
-        // Floating Action Buttons (Right Side: Zoom +, Zoom -, My Location, Street View)
+        // Floating Action Buttons (Right Side: Zoom +, Zoom -, My Location, Google Maps, Street View 360)
         Column(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
@@ -309,11 +404,21 @@ fun DropwayMapView(
                 }
             )
 
+            // Open in Google Maps App
+            FloatingRoundButton(
+                iconRes = R.drawable.ic_navigation,
+                contentDescription = "เปิดใน Google Maps",
+                tint = DropwayPrimary,
+                onClick = {
+                    LocationUtils.openNavigation(context, currentLat, currentLng, "พิกัดที่เลือก")
+                }
+            )
+
             // Real Google Street View 360° Panorama Launcher
             FloatingRoundButton(
                 iconRes = R.drawable.ic_street_view,
                 contentDescription = "ดูภาพถนนจริง Street View",
-                tint = DropwayPrimary,
+                tint = DropwayPrimaryDark,
                 onClick = {
                     LocationUtils.openStreetView(context, currentLat, currentLng)
                 }
@@ -346,7 +451,7 @@ fun DropwayMapView(
                         text = "เลื่อนแผนที่ให้หมุดชี้ที่หลังคาหรือหน้าบ้าน",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF1E293B)
+                        color = Color(0xFF0F172A)
                     )
                 }
             }
@@ -365,7 +470,7 @@ private fun FloatingRoundButton(
         shape = CircleShape,
         color = Color.White,
         shadowElevation = 4.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1)),
         modifier = Modifier.size(38.dp)
     ) {
         IconButton(
