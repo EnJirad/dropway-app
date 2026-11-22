@@ -217,9 +217,10 @@ fun HouseholdCard(
     onNavigate: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         color = Color.White,
         shadowElevation = 2.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
         modifier = Modifier
             .fillMaxWidth()
             .clickable { onClick() }
@@ -290,7 +291,8 @@ fun HouseholdCard(
                         Text(
                             "ยังไม่มีพิกัด",
                             fontSize = 11.sp,
-                            color = TextMuted
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
                         )
                     }
                 }

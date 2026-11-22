@@ -66,8 +66,9 @@ fun ProfileScreen(
                 )
                 Text(
                     text = "Offline-First Parcel Delivery Workspace",
-                    color = Color(0xFF94A3B8),
-                    fontSize = 12.sp
+                    color = Color(0xFFE2E8F0),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
                 )
             }
         }

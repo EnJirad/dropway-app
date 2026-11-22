@@ -32,8 +32,8 @@ private val DarkColorScheme = darkColorScheme(
     surface = DropwaySurfaceDark,
     onSurface = Color(0xFFF8FAFC),
     surfaceVariant = Color(0xFF334155),
-    onSurfaceVariant = Color(0xFF94A3B8),
-    outline = Color(0xFF475569)
+    onSurfaceVariant = Color(0xFFE2E8F0),
+    outline = Color(0xFF64748B)
 )
 
 @Composable

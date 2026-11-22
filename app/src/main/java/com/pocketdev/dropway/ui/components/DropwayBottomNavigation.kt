@@ -33,13 +33,14 @@ fun DropwayBottomNavigation(
 ) {
     Surface(
         color = Color.White,
-        shadowElevation = 8.dp
+        shadowElevation = 10.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0))
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(vertical = 6.dp),
+                .padding(horizontal = 8.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceAround,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -48,22 +49,23 @@ fun DropwayBottomNavigation(
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (isSelected) DropwayPrimary.copy(alpha = 0.12f) else Color.Transparent)
                         .clickable { onTabSelected(tab) }
-                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
                 ) {
                     Icon(
                         painter = painterResource(id = tab.iconRes),
                         contentDescription = tab.label,
-                        tint = if (isSelected) DropwayPrimary else Color(0xFF64748B),
+                        tint = if (isSelected) DropwayPrimary else Color(0xFF334155),
                         modifier = Modifier.size(22.dp)
                     )
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = tab.label,
                         fontSize = 12.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (isSelected) DropwayPrimary else Color(0xFF64748B)
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                        color = if (isSelected) DropwayPrimary else Color(0xFF334155)
                     )
                 }
             }

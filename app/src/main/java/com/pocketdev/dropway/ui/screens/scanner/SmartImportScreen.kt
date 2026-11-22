@@ -255,7 +255,7 @@ fun ParsedRowCard(
                     Icon(
                         painter = painterResource(id = R.drawable.ic_close),
                         contentDescription = "ลบ",
-                        tint = Color(0xFF94A3B8),
+                        tint = Color(0xFF64748B),
                         modifier = Modifier.size(16.dp).clickable { onDelete() }
                     )
                 }
@@ -264,7 +264,8 @@ fun ParsedRowCard(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "${row.recipientName.ifBlank { "-" }} • โทร: ${row.recipientPhone.ifBlank { "-" }}",
-                fontSize = 12.sp,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
                 color = TextPrimary
             )
 

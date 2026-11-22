@@ -18,10 +18,7 @@ import androidx.compose.ui.unit.sp
 import com.pocketdev.dropway.DropwayApplication
 import com.pocketdev.dropway.core.model.Parcel
 import com.pocketdev.dropway.core.util.TrackingUtils
-import com.pocketdev.dropway.ui.theme.DropwayBackground
-import com.pocketdev.dropway.ui.theme.DropwayNavy
-import com.pocketdev.dropway.ui.theme.DropwayPrimary
-import com.pocketdev.dropway.ui.theme.StatusDelivered
+import com.pocketdev.dropway.ui.theme.*
 import kotlinx.coroutines.launch
 
 enum class ScanMode(val title: String, val iconRes: Int) {
@@ -95,15 +92,15 @@ fun ScannerWorkspaceScreen(
                                 Icon(
                                     painter = painterResource(id = mode.iconRes),
                                     contentDescription = null,
-                                    tint = if (isSelected) Color.White else Color(0xFF94A3B8),
+                                    tint = if (isSelected) Color.White else Color(0xFFE2E8F0),
                                     modifier = Modifier.size(15.dp)
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = mode.title,
                                     fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) Color.White else Color(0xFF94A3B8)
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                    color = if (isSelected) Color.White else Color(0xFFE2E8F0)
                                 )
                             }
                         }
@@ -157,7 +154,8 @@ fun BarcodeScanWorkspace(onParcelSaved: () -> Unit) {
                 Text(
                     text = "สแกนด้วยเครื่องอ่านบาร์โค้ด หรือพิมพ์เลขพัสดุเพื่อเก็บเข้าคิว",
                     fontSize = 12.sp,
-                    color = Color(0xFF64748B)
+                    color = TextSecondary,
+                    fontWeight = FontWeight.Medium
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -246,7 +244,7 @@ fun BarcodeScanWorkspace(onParcelSaved: () -> Unit) {
 
                 if (scannedQueue.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("ยังไม่มีพัสดุในคิวสแกน", color = Color(0xFF94A3B8), fontSize = 13.sp)
+                        Text("ยังไม่มีพัสดุในคิวสแกน", color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     }
                 } else {
                     androidx.compose.foundation.lazy.LazyColumn(

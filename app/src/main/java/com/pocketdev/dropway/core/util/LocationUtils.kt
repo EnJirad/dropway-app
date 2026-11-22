@@ -59,4 +59,27 @@ object LocationUtils {
             }
         }
     }
+
+    /**
+     * Launches external Street View 360 viewer for the given coordinates.
+     */
+    fun openStreetView(context: Context, latitude: Double, longitude: Double) {
+        val svUri = Uri.parse("google.streetview:cbll=$latitude,$longitude")
+        val svIntent = Intent(Intent.ACTION_VIEW, svUri).apply {
+            setPackage("com.google.android.apps.maps")
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        if (svIntent.resolveActivity(context.packageManager) != null) {
+            context.startActivity(svIntent)
+        } else {
+            // Fallback to web street view / pano
+            val webUri = Uri.parse("https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=$latitude,$longitude")
+            val webIntent = Intent(Intent.ACTION_VIEW, webUri).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            try {
+                context.startActivity(webIntent)
+            } catch (_: Exception) {}
+        }
+    }
 }

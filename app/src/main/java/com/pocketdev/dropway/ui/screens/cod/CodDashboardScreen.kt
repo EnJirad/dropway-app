@@ -65,8 +65,9 @@ fun CodDashboardScreen() {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "คำนวณด้วยระบบทศนิยมแม่นยำ ป้องกันเงินตกหล่น แม้ไม่มีสัญญาณเน็ต",
-                    color = Color(0xFF94A3B8),
-                    fontSize = 12.sp
+                    color = Color(0xFFE2E8F0),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -82,7 +83,7 @@ fun CodDashboardScreen() {
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column {
-                                Text("ยอด COD รวมวันนี้", color = Color(0xFF94A3B8), fontSize = 11.sp)
+                                Text("ยอด COD รวมวันนี้", color = Color(0xFFCBD5E1), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 Text(
                                     text = MoneyUtils.formatBaht(codSummary.totalCodSatang),
                                     color = Color.White,

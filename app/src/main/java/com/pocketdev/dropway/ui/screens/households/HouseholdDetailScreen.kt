@@ -93,8 +93,9 @@ fun HouseholdDetailScreen(
                             if (h.village.isNotBlank()) {
                                 Text(
                                     text = "หมู่ ${h.village} ${h.villageName}",
-                                    color = Color(0xFF94A3B8),
-                                    fontSize = 12.sp
+                                    color = Color(0xFFE2E8F0),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
                         }
@@ -186,6 +187,25 @@ fun HouseholdDetailScreen(
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
                                     Text("เริ่มนำทางไปบ้านนี้", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            OutlinedButton(
+                                onClick = {
+                                    LocationUtils.openStreetView(context, h.latitude, h.longitude)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_street_view),
+                                        contentDescription = null,
+                                        tint = DropwayPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("ดูภาพถนนจริง (Street View 360°)", fontWeight = FontWeight.Bold, color = TextPrimary)
                                 }
                             }
                         } else {

@@ -60,9 +60,9 @@ fun DropwayTopBar(
                     )
                     Text(
                         text = title,
-                        color = Color(0xFF94A3B8),
+                        color = Color(0xFFE2E8F0),
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
+                        fontWeight = FontWeight.SemiBold
                     )
                 }
             }

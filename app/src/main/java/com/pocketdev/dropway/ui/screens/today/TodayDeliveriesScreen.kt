@@ -120,8 +120,9 @@ fun TodayDeliveriesScreen(
                             )
                             Text(
                                 text = "ทั้งหมด ${parcels.size} ชิ้น • สำเร็จ ${summary.deliveredCount} • คงเหลือ ${summary.pendingCount}",
-                                color = Color(0xFF94A3B8),
-                                fontSize = 12.sp
+                                color = Color(0xFFE2E8F0),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
