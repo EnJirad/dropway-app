@@ -99,7 +99,7 @@ fun LocationPickerScreen(
                                 color = TextPrimary
                             )
                             Text(
-                                text = "สลับแผนที่ถนน / ดาวเทียม เพื่อหาหลังคาบ้าน",
+                                text = "สลับผู้ให้บริการแผนที่ หรือเลื่อนเพื่อระบุจุดส่ง",
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = TextSecondary
