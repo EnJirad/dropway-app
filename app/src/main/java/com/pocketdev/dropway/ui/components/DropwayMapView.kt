@@ -2,11 +2,14 @@ package com.pocketdev.dropway.ui.components
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.net.http.SslError
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.webkit.JavascriptInterface
+import android.webkit.SslErrorHandler
+import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -366,7 +369,7 @@ fun DropwayMapView(
                 modifier = Modifier.fillMaxSize()
             )
         } else {
-            // Engine 2: Compliant Leaflet WebView Map (OpenStreetMap / Esri / OpenTopoMap)
+            // Engine 2: Compliant Leaflet WebView Map (OpenStreetMap / Esri / Google Hybrid Tile fallback)
             AndroidView(
                 factory = { ctx ->
                     WebView(ctx).apply {
@@ -374,11 +377,18 @@ fun DropwayMapView(
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
+                            allowFileAccess = true
+                            allowContentAccess = true
+                            allowFileAccessFromFileURLs = true
+                            allowUniversalAccessFromFileURLs = true
+                            databaseEnabled = true
                             cacheMode = WebSettings.LOAD_DEFAULT
+                            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                             useWideViewPort = true
                             loadWithOverviewMode = true
                             builtInZoomControls = false
                             displayZoomControls = false
+                            userAgentString = "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 Dropway/1.0"
                         }
 
                         val bridge = AndroidBridge(
@@ -402,6 +412,10 @@ fun DropwayMapView(
                         addJavascriptInterface(bridge, "AndroidMap")
 
                         webViewClient = object : WebViewClient() {
+                            override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+                                handler?.proceed()
+                            }
+
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 view?.evaluateJavascript(
@@ -414,7 +428,9 @@ fun DropwayMapView(
                             }
                         }
 
-                        loadDataWithBaseURL("https://dropway.local", mapHtml, "text/html", "UTF-8", null)
+                        webChromeClient = object : WebChromeClient() {}
+
+                        loadUrl("file:///android_asset/map.html")
                         webViewRef = this
                     }
                 },
@@ -485,74 +501,88 @@ fun DropwayMapView(
             }
         }
 
-        // Top Controls: Segmented Map Switcher [ ไฮบริด | ถนน | ดาวเทียม | ภูมิประเทศ ]
-        Surface(
+        // Top Controls: Segmented Map Switcher + Live Coordinates HUD (Unified Column, Zero Overlap!)
+        Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = 8.dp),
-            shape = RoundedCornerShape(30.dp),
-            color = Color.White,
-            shadowElevation = 6.dp,
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1))
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Row(
-                modifier = Modifier.padding(3.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // Segmented Map Switcher [ ไฮบริด | ถนน | ดาวเทียม | ภูมิประเทศ ]
+            Surface(
+                shape = RoundedCornerShape(30.dp),
+                color = Color.White,
+                shadowElevation = 6.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFCBD5E1))
             ) {
-                DropwayMapType.values().forEach { type ->
-                    val isSelected = currentMapType == type
-                    Surface(
-                        shape = RoundedCornerShape(20.dp),
-                        color = if (isSelected) DropwayPrimary else Color.Transparent,
-                        modifier = Modifier.clickable {
-                            currentMapType = type
-                        }
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            val iconRes = when (type) {
-                                DropwayMapType.ROAD -> R.drawable.ic_map
-                                DropwayMapType.HYBRID -> R.drawable.ic_layers
-                                DropwayMapType.SATELLITE -> R.drawable.ic_satellite
-                                DropwayMapType.TERRAIN -> R.drawable.ic_navigation
+                Row(
+                    modifier = Modifier.padding(3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    DropwayMapType.values().forEach { type ->
+                        val isSelected = currentMapType == type
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (isSelected) DropwayPrimary else Color.Transparent,
+                            modifier = Modifier.clickable {
+                                currentMapType = type
+                                if (useGoogleMaps) {
+                                    googleMapRef?.mapType = when (type) {
+                                        DropwayMapType.HYBRID -> GoogleMap.MAP_TYPE_HYBRID
+                                        DropwayMapType.ROAD -> GoogleMap.MAP_TYPE_NORMAL
+                                        DropwayMapType.SATELLITE -> GoogleMap.MAP_TYPE_SATELLITE
+                                        DropwayMapType.TERRAIN -> GoogleMap.MAP_TYPE_TERRAIN
+                                    }
+                                } else {
+                                    webViewRef?.evaluateJavascript("switchLayer('${type.layerKey}');", null)
+                                }
                             }
-                            Icon(
-                                painter = painterResource(id = iconRes),
-                                contentDescription = null,
-                                tint = if (isSelected) Color.White else Color(0xFF0F172A),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = type.label,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isSelected) Color.White else Color(0xFF0F172A)
-                            )
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val iconRes = when (type) {
+                                    DropwayMapType.ROAD -> R.drawable.ic_map
+                                    DropwayMapType.HYBRID -> R.drawable.ic_layers
+                                    DropwayMapType.SATELLITE -> R.drawable.ic_satellite
+                                    DropwayMapType.TERRAIN -> R.drawable.ic_navigation
+                                }
+                                Icon(
+                                    painter = painterResource(id = iconRes),
+                                    contentDescription = null,
+                                    tint = if (isSelected) Color.White else Color(0xFF0F172A),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = type.label,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) Color.White else Color(0xFF0F172A)
+                                )
+                            }
                         }
                     }
                 }
             }
-        }
 
-        // Live Coordinates HUD Pill (Top Left)
-        Surface(
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(start = 10.dp, top = 10.dp),
-            shape = RoundedCornerShape(10.dp),
-            color = DropwayNavy.copy(alpha = 0.92f),
-            shadowElevation = 4.dp
-        ) {
-            Text(
-                text = String.format(Locale.US, "%.5f, %.5f", currentLat, currentLng),
-                color = Color.White,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // Live Coordinates HUD Pill (Centered beneath switcher, never colliding with tabs!)
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = DropwayNavy.copy(alpha = 0.92f),
+                shadowElevation = 4.dp
+            ) {
+                Text(
+                    text = String.format(Locale.US, "พิกัด: %.5f, %.5f", currentLat, currentLng),
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                )
+            }
         }
 
         // Offline Warning Banner
@@ -560,7 +590,7 @@ fun DropwayMapView(
             Surface(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 46.dp),
+                    .padding(top = 80.dp),
                 shape = RoundedCornerShape(16.dp),
                 color = Color(0xFFFEF3C7),
                 shadowElevation = 4.dp,
