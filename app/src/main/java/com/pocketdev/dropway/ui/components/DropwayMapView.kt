@@ -6,7 +6,9 @@ import android.net.http.SslError
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.View
+import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
@@ -179,15 +181,6 @@ fun DropwayMapView(
     var isWebViewReady by remember { mutableStateOf(false) }
 
     var showStreetViewDialog by remember { mutableStateOf(false) }
-
-    // Pre-load map html
-    val mapHtml = remember {
-        try {
-            context.assets.open("map.html").bufferedReader().use { it.readText() }
-        } catch (_: Exception) {
-            ""
-        }
-    }
 
     // Sync external coordinate changes (e.g. city presets)
     LaunchedEffect(initialLat, initialLng) {
@@ -384,11 +377,14 @@ fun DropwayMapView(
                             databaseEnabled = true
                             cacheMode = WebSettings.LOAD_DEFAULT
                             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                            loadsImagesAutomatically = true
+                            blockNetworkImage = false
+                            blockNetworkLoads = false
                             useWideViewPort = true
                             loadWithOverviewMode = true
                             builtInZoomControls = false
                             displayZoomControls = false
-                            userAgentString = "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36 Dropway/1.0"
+                            userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
                         }
 
                         val bridge = AndroidBridge(
@@ -416,6 +412,10 @@ fun DropwayMapView(
                                 handler?.proceed()
                             }
 
+                            override fun onReceivedError(view: WebView?, errorCode: Int, description: String?, failingUrl: String?) {
+                                Log.e("DropwayMapWV", "WebView Error ($errorCode): $description at $failingUrl")
+                            }
+
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 view?.evaluateJavascript(
@@ -428,7 +428,12 @@ fun DropwayMapView(
                             }
                         }
 
-                        webChromeClient = object : WebChromeClient() {}
+                        webChromeClient = object : WebChromeClient() {
+                            override fun onConsoleMessage(consoleMessage: ConsoleMessage?): Boolean {
+                                Log.d("DropwayMapJS", "${consoleMessage?.message()} [${consoleMessage?.sourceId()}:${consoleMessage?.lineNumber()}]")
+                                return true
+                            }
+                        }
 
                         loadUrl("file:///android_asset/map.html")
                         webViewRef = this

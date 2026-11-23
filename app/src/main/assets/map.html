@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="referrer" content="no-referrer" />
     <style>
 /* required styles */
 
@@ -67,8 +68,7 @@
 	}
 
 .leaflet-container img.leaflet-tile {
-	/* See: https://bugs.chromium.org/p/chromium/issues/detail?id=600120 */
-	mix-blend-mode: plus-lighter;
+	/* Removed deprecated mix-blend-mode that broke modern Chromium WebView rendering */
 }
 
 .leaflet-container.leaflet-touch-zoom {
@@ -93,10 +93,10 @@
 }
 .leaflet-tile {
 	filter: inherit;
-	visibility: hidden;
+	visibility: visible !important;
 	}
 .leaflet-tile-loaded {
-	visibility: inherit;
+	visibility: visible !important;
 	}
 .leaflet-zoom-box {
 	width: 0;
@@ -770,83 +770,96 @@ html, body {
         function initTileLayers() {
             if (googleSatLayer) return;
 
-            // 1. Google Hybrid Satellite (ภาพดาวเทียมคมชัด + ถนน + ป้ายชื่อภาษาไทย) - Zero API Key, Free
+            // 1. Google Hybrid Satellite (ภาพดาวเทียมความละเอียดสูง + ถนน + อาคาร + ป้ายภาษาไทย) - Zero API Key, Free
             googleSatLayer = L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&hl=th', {
-                subdomains: '0123',
-                maxZoom: 20
+                subdomains: ['0', '1', '2', '3'],
+                maxZoom: 21,
+                maxNativeZoom: 19,
+                crossOrigin: false
             });
 
-            // 2. Google Pure Satellite (ภาพดาวเทียมแท้) - Zero API Key, Free
+            // 2. Google Pure Satellite (ภาพดาวเทียมแท้ เห็นหลังคาบ้าน ต้นไม้ คมชัด) - Zero API Key, Free
             pureSatLayer = L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-                subdomains: '0123',
-                maxZoom: 20
+                subdomains: ['0', '1', '2', '3'],
+                maxZoom: 21,
+                maxNativeZoom: 19,
+                crossOrigin: false
             });
 
             // 3. Google Road (ถนน + ซอย + ป้ายชื่อภาษาไทย) - Zero API Key, Free
             googleRoadLayer = L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&hl=th', {
-                subdomains: '0123',
-                maxZoom: 20
+                subdomains: ['0', '1', '2', '3'],
+                maxZoom: 21,
+                maxNativeZoom: 19,
+                crossOrigin: false
             });
 
             // 4. Google Terrain (ภูมิประเทศ + ความสูง) - Zero API Key, Free
             googleTerrainLayer = L.tileLayer('https://mt{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}&hl=th', {
-                subdomains: '0123',
-                maxZoom: 20
+                subdomains: ['0', '1', '2', '3'],
+                maxZoom: 21,
+                maxNativeZoom: 19,
+                crossOrigin: false
             });
 
-            // 5. Esri World Imagery (Satellite Fallback) - Free
+            // 5. Esri World Imagery (Satellite Fallback คมชัดระดับเห็นหลังคา) - Free
             esriSatLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                maxZoom: 19
+                maxZoom: 21,
+                maxNativeZoom: 19,
+                crossOrigin: false
             });
 
             // 6. CartoDB Voyager (Road Fallback) - Free
             cartoRoadLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
                 subdomains: 'abcd',
-                maxZoom: 19
+                maxZoom: 20,
+                maxNativeZoom: 19,
+                crossOrigin: false
             });
 
             // 7. CartoDB Labels Only (For Hybrid Overlay Fallback) - Free
             cartoLabelsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png', {
                 subdomains: 'abcd',
-                maxZoom: 19,
-                pane: 'labelsPane'
+                maxZoom: 20,
+                maxNativeZoom: 19,
+                pane: 'labelsPane',
+                crossOrigin: false
             });
 
             // 8. OpenStreetMap (Road Fallback 2) - Free
             osmRoadLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                maxZoom: 19
+                maxZoom: 19,
+                crossOrigin: false
             });
 
             // 9. OpenTopoMap (Terrain Fallback) - Free
             topoLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
                 subdomains: 'abc',
-                maxZoom: 17
+                maxZoom: 17,
+                crossOrigin: false
             });
 
-            // Automatic Bulletproof Fallback Hooks
-            googleSatLayer.on('tileerror', function() {
-                if (map && (currentLayerType === 'hybrid' || currentLayerType === 'satellite') && !map.hasLayer(esriSatLayer)) {
-                    map.addLayer(esriSatLayer);
+            // Graceful Failover
+            var satFallbackTriggered = false;
+            function triggerSatFallback() {
+                if (satFallbackTriggered || !map) return;
+                satFallbackTriggered = true;
+                if (currentLayerType === 'hybrid' || currentLayerType === 'satellite') {
+                    if (map.hasLayer(googleSatLayer)) map.removeLayer(googleSatLayer);
+                    if (map.hasLayer(pureSatLayer)) map.removeLayer(pureSatLayer);
+                    if (!map.hasLayer(esriSatLayer)) map.addLayer(esriSatLayer);
                 }
-            });
-            pureSatLayer.on('tileerror', function() {
-                if (map && currentLayerType === 'satellite' && !map.hasLayer(esriSatLayer)) {
-                    map.addLayer(esriSatLayer);
-                }
-            });
-            esriSatLayer.on('tileerror', function() {
-                if (map && !map.hasLayer(googleSatLayer)) {
-                    map.addLayer(googleSatLayer);
-                }
-            });
+            }
+            googleSatLayer.on('tileerror', triggerSatFallback);
+            pureSatLayer.on('tileerror', triggerSatFallback);
+
+            var roadFallbackTriggered = false;
             googleRoadLayer.on('tileerror', function() {
-                if (map && currentLayerType === 'road' && !map.hasLayer(cartoRoadLayer)) {
-                    map.addLayer(cartoRoadLayer);
-                }
-            });
-            googleTerrainLayer.on('tileerror', function() {
-                if (map && currentLayerType === 'terrain' && !map.hasLayer(googleRoadLayer)) {
-                    map.addLayer(googleRoadLayer);
+                if (roadFallbackTriggered || !map) return;
+                roadFallbackTriggered = true;
+                if (currentLayerType === 'road') {
+                    if (map.hasLayer(googleRoadLayer)) map.removeLayer(googleRoadLayer);
+                    if (!map.hasLayer(cartoRoadLayer)) map.addLayer(cartoRoadLayer);
                 }
             });
         }
