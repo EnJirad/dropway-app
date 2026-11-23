@@ -2,6 +2,7 @@ package com.pocketdev.dropway.ui.components
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.os.Bundle
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
@@ -12,6 +13,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,7 +25,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -31,6 +37,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -43,6 +50,7 @@ import com.pocketdev.dropway.BuildConfig
 import com.pocketdev.dropway.R
 import com.pocketdev.dropway.core.util.LocationUtils
 import com.pocketdev.dropway.core.util.NetworkUtils
+import com.pocketdev.dropway.ui.components.map.CachedTileBitmap
 import com.pocketdev.dropway.ui.components.map.MapTileLoader
 import com.pocketdev.dropway.ui.components.map.MapTileMath
 import com.pocketdev.dropway.ui.theme.*
@@ -59,25 +67,29 @@ enum class DropwayMapType(
     val label: String,
     val layerKey: String,
     val iconRes: Int,
-    val attribution: String
+    val attribution: String,
+    val maxNativeZoom: Int
 ) {
     OPEN_STREET_MAP(
         label = "OpenStreetMap",
         layerKey = "osm",
         iconRes = R.drawable.ic_map,
-        attribution = "© OpenStreetMap contributors"
+        attribution = "© OpenStreetMap contributors",
+        maxNativeZoom = 19
     ),
     SATELLITE(
         label = "ดาวเทียม",
         layerKey = "satellite",
         iconRes = R.drawable.ic_satellite,
-        attribution = "© Esri, Maxar, Earthstar Geographics"
+        attribution = "© Esri, Maxar, Earthstar Geographics",
+        maxNativeZoom = 19
     ),
     CARTO_VOYAGER(
         label = "Carto",
         layerKey = "carto",
         iconRes = R.drawable.ic_layers,
-        attribution = "© CARTO © OpenStreetMap contributors"
+        attribution = "© CARTO © OpenStreetMap contributors",
+        maxNativeZoom = 19
     );
 
     fun getTileUrl(x: Int, y: Int, z: Int): String {
@@ -95,7 +107,9 @@ data class MapMarkerItem(
     val longitude: Double,
     val title: String,
     val status: String, // "DELIVERED", "PENDING", "COD"
-    val subtitle: String = ""
+    val subtitle: String = "",
+    val sequenceNumber: Int? = null,
+    val isSelected: Boolean = false
 )
 
 /**
@@ -171,15 +185,16 @@ fun rememberMapViewWithLifecycle(): MapView {
 /**
  * Native Android Raster Tile Map Viewer:
  * Rebuilt using Velnox Mobile's proven native raster tile architecture in Jetpack Compose.
- * Eliminates all WebView, WebGL, MapLibre, and Leaflet dependencies for 2D mapping.
  *
- * Provides:
- * - Real raster map tiles: OpenStreetMap, real Satellite imagery (Esri), and Carto Voyager.
- * - Multi-touch pan & pinch-to-zoom with Web Mercator camera positioning.
- * - Native bitmap tile loader with in-memory LruCache and persistent disk caching.
- * - Single fixed center pin with rooftop crosshairs in picker mode.
- * - Numbered status-colored delivery markers in viewer mode.
- * - Preserved Google Street View 360° panorama launcher.
+ * Upgraded Features:
+ * - Deep Satellite Zoom up to Zoom 23.0 with smooth adaptive overzoom.
+ * - Focal-point pinch zoom and double-tap zoom for fluid camera navigation.
+ * - Progressive tile replacement using Quadtree ancestor cache lookups (no blank flashes).
+ * - Precision Micro Pin Markers: compact, translucent, numbered needle markers anchored exactly
+ *   to destination coordinates to prevent obscuring rooftop satellite imagery.
+ * - Dual-state markers (unselected translucent 58%, selected prominent 90% with bright border).
+ * - High-contrast military reticle crosshairs with center opening in picker mode.
+ * - Strictly isolated Google Street View 360° panorama integration.
  * - Strictly zero emojis across all UI, drawables, and strings.
  */
 @Composable
@@ -190,6 +205,7 @@ fun DropwayMapView(
     initialZoom: Float = 16f,
     isPickerMode: Boolean = true,
     markers: List<MapMarkerItem> = emptyList(),
+    selectedMarkerId: Long? = null,
     onCoordinatesChanged: ((Double, Double) -> Unit)? = null,
     onMarkerClick: ((Long) -> Unit)? = null
 ) {
@@ -232,41 +248,96 @@ fun DropwayMapView(
             val density = LocalDensity.current.density
             val wPx = constraints.maxWidth.toFloat()
             val hPx = constraints.maxHeight.toFloat()
+            val halfW = wPx / 2f
+            val halfH = hPx / 2f
 
             // Multi-touch gestures: Drag pan + Pinch zoom + Double tap zoom
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(Unit) {
+                    .pointerInput(isPickerMode, currentLat, currentLng, zoom) {
                         detectTapGestures(
-                            onDoubleTap = {
-                                zoom = (zoom + 1.0).coerceAtMost(MapTileMath.MAX_ZOOM)
-                                onCoordinatesChanged?.invoke(currentLat, currentLng)
+                            onDoubleTap = { tapOffset ->
+                                val oldZoom = zoom
+                                val newZoom = (oldZoom + 1.0).coerceAtMost(MapTileMath.MAX_ZOOM)
+                                if (newZoom != oldZoom) {
+                                    val fx = if (isPickerMode) halfW else tapOffset.x
+                                    val fy = if (isPickerMode) halfH else tapOffset.y
+
+                                    val oldTotalPx = 2.0.pow(oldZoom) * MapTileMath.TILE_SIZE
+                                    val currWorldX = ((currentLng + 180.0) / 360.0) * oldTotalPx
+                                    val latClamped = currentLat.coerceIn(-85.05112878, 85.05112878)
+                                    val latRad = Math.toRadians(latClamped)
+                                    val currWorldY = ((1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / Math.PI) / 2.0) * oldTotalPx
+
+                                    val focusWorldX = currWorldX + (fx.toDouble() - halfW.toDouble())
+                                    val focusWorldY = currWorldY + (fy.toDouble() - halfH.toDouble())
+
+                                    val focusLng = (focusWorldX / oldTotalPx) * 360.0 - 180.0
+                                    val mercYFocus = 0.5 - (focusWorldY / oldTotalPx)
+                                    val focusLat = Math.toDegrees(atan(sinh(mercYFocus * 2.0 * Math.PI))).coerceIn(-85.05112878, 85.05112878)
+
+                                    val newTotalPx = 2.0.pow(newZoom) * MapTileMath.TILE_SIZE
+                                    val newFocusWorldX = ((focusLng + 180.0) / 360.0) * newTotalPx
+                                    val focusLatRad = Math.toRadians(focusLat)
+                                    val newFocusWorldY = ((1.0 - ln(tan(focusLatRad) + 1.0 / cos(focusLatRad)) / Math.PI) / 2.0) * newTotalPx
+
+                                    val newCenterWorldX = newFocusWorldX - (fx.toDouble() - halfW.toDouble())
+                                    val newCenterWorldY = newFocusWorldY - (fy.toDouble() - halfH.toDouble())
+
+                                    val newLng = ((newCenterWorldX / newTotalPx) * 360.0 - 180.0).coerceIn(-180.0, 180.0)
+                                    val mercYCenter = 0.5 - (newCenterWorldY / newTotalPx)
+                                    val newLat = Math.toDegrees(atan(sinh(mercYCenter * 2.0 * Math.PI))).coerceIn(-85.05112878, 85.05112878)
+
+                                    zoom = newZoom
+                                    currentLat = newLat
+                                    currentLng = newLng
+                                    onCoordinatesChanged?.invoke(newLat, newLng)
+                                }
                             }
                         )
                     }
-                    .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoomFactor, _ ->
-                            if (zoomFactor != 1f) {
-                                val zoomChange = ln(zoomFactor.toDouble()) / ln(2.0)
-                                zoom = (zoom + zoomChange).coerceIn(MapTileMath.MIN_ZOOM, MapTileMath.MAX_ZOOM)
-                            }
-                            if (pan.x != 0f || pan.y != 0f) {
+                    .pointerInput(isPickerMode, currentLat, currentLng, zoom) {
+                        detectTransformGestures { centroid, pan, zoomFactor, _ ->
+                            if (zoomFactor != 1f || pan.x != 0f || pan.y != 0f) {
                                 isDragging = true
-                                val n = 2.0.pow(zoom)
-                                val worldTotalPx = n * MapTileMath.TILE_SIZE
-                                val currWorldX = ((currentLng + 180.0) / 360.0) * worldTotalPx
+                                val oldZoom = zoom
+                                val newZoom = if (zoomFactor != 1f) {
+                                    val zoomChange = ln(zoomFactor.toDouble()) / ln(2.0)
+                                    (oldZoom + zoomChange).coerceIn(MapTileMath.MIN_ZOOM, MapTileMath.MAX_ZOOM)
+                                } else {
+                                    oldZoom
+                                }
+
+                                val fx = if (isPickerMode) halfW else centroid.x
+                                val fy = if (isPickerMode) halfH else centroid.y
+
+                                val oldTotalPx = 2.0.pow(oldZoom) * MapTileMath.TILE_SIZE
+                                val currWorldX = ((currentLng + 180.0) / 360.0) * oldTotalPx
                                 val latClamped = currentLat.coerceIn(-85.05112878, 85.05112878)
                                 val latRad = Math.toRadians(latClamped)
-                                val currWorldY = ((1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / Math.PI) / 2.0) * worldTotalPx
+                                val currWorldY = ((1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / Math.PI) / 2.0) * oldTotalPx
 
-                                val newWorldX = currWorldX - pan.x.toDouble()
-                                val newWorldY = currWorldY - pan.y.toDouble()
+                                val focusWorldX = currWorldX + (fx.toDouble() - halfW.toDouble())
+                                val focusWorldY = currWorldY + (fy.toDouble() - halfH.toDouble())
 
-                                val newLng = ((newWorldX / worldTotalPx) * 360.0 - 180.0).coerceIn(-180.0, 180.0)
-                                val mercY = 0.5 - (newWorldY / worldTotalPx)
-                                val newLat = Math.toDegrees(atan(sinh(mercY * 2.0 * Math.PI))).coerceIn(-85.05112878, 85.05112878)
+                                val focusLng = (focusWorldX / oldTotalPx) * 360.0 - 180.0
+                                val mercYFocus = 0.5 - (focusWorldY / oldTotalPx)
+                                val focusLat = Math.toDegrees(atan(sinh(mercYFocus * 2.0 * Math.PI))).coerceIn(-85.05112878, 85.05112878)
 
+                                val newTotalPx = 2.0.pow(newZoom) * MapTileMath.TILE_SIZE
+                                val newFocusWorldX = ((focusLng + 180.0) / 360.0) * newTotalPx
+                                val focusLatRad = Math.toRadians(focusLat)
+                                val newFocusWorldY = ((1.0 - ln(tan(focusLatRad) + 1.0 / cos(focusLatRad)) / Math.PI) / 2.0) * newTotalPx
+
+                                val newCenterWorldX = newFocusWorldX - (fx.toDouble() - halfW.toDouble()) - pan.x.toDouble()
+                                val newCenterWorldY = newFocusWorldY - (fy.toDouble() - halfH.toDouble()) - pan.y.toDouble()
+
+                                val newLng = ((newCenterWorldX / newTotalPx) * 360.0 - 180.0).coerceIn(-180.0, 180.0)
+                                val mercYCenter = 0.5 - (newCenterWorldY / newTotalPx)
+                                val newLat = Math.toDegrees(atan(sinh(mercYCenter * 2.0 * Math.PI))).coerceIn(-85.05112878, 85.05112878)
+
+                                zoom = newZoom
                                 currentLat = newLat
                                 currentLng = newLng
                                 onCoordinatesChanged?.invoke(newLat, newLng)
@@ -280,15 +351,14 @@ fun DropwayMapView(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Layer 2: Native Slippy Raster Map Tiles
-                val intZoom = zoom.toInt().coerceIn(MapTileMath.MIN_ZOOM.toInt(), MapTileMath.MAX_ZOOM.toInt())
-                val scale = 2.0.pow(zoom - intZoom).toFloat()
+                // Layer 2: Native Slippy Raster Map Tiles with Adaptive Deep Zoom
+                val sourceTileZoom = min(zoom.toInt(), currentMapType.maxNativeZoom).coerceIn(MapTileMath.MIN_ZOOM.toInt(), currentMapType.maxNativeZoom)
+                val overzoomFactor = 2.0.pow(zoom - sourceTileZoom)
+                val scale = overzoomFactor.toFloat()
                 val scaledTilePx = (MapTileMath.TILE_SIZE * scale).toFloat()
-                val numTiles = 1 shl intZoom
+                val numTiles = 1 shl sourceTileZoom
 
-                val (centerMercX, centerMercY) = MapTileMath.latLngToMercator(currentLat, currentLng, intZoom.toDouble())
-                val halfW = wPx / 2f
-                val halfH = hPx / 2f
+                val (centerMercX, centerMercY) = MapTileMath.latLngToMercator(currentLat, currentLng, sourceTileZoom.toDouble())
 
                 val minTileX = floor((centerMercX - halfW / scale) / MapTileMath.TILE_SIZE).toInt()
                 val maxTileX = ceil((centerMercX + halfW / scale) / MapTileMath.TILE_SIZE).toInt()
@@ -300,11 +370,13 @@ fun DropwayMapView(
                         val wrappedTx = ((tx % numTiles) + numTiles) % numTiles
                         val tileScreenX = halfW + ((tx * MapTileMath.TILE_SIZE - centerMercX) * scale).toFloat()
                         val tileScreenY = halfH + ((ty * MapTileMath.TILE_SIZE - centerMercY) * scale).toFloat()
-                        val tileUrl = currentMapType.getTileUrl(wrappedTx, ty, intZoom)
 
-                        key("$intZoom-$wrappedTx-$ty-$currentMapType") {
+                        key("$sourceTileZoom-$wrappedTx-$ty-$currentMapType") {
                             NativeTileItem(
-                                tileUrl = tileUrl,
+                                mapType = currentMapType,
+                                x = wrappedTx,
+                                y = ty,
+                                z = sourceTileZoom,
                                 modifier = Modifier
                                     .offset { IntOffset(tileScreenX.roundToInt(), tileScreenY.roundToInt()) }
                                     .size((scaledTilePx / density).dp)
@@ -313,62 +385,66 @@ fun DropwayMapView(
                     }
                 }
 
-                // Layer 3: Delivery Markers (Viewer Mode only)
+                // Layer 3: Precision Micro House Markers (Viewer Mode only)
                 if (!isPickerMode) {
-                    markers.forEachIndexed { index, marker ->
-                        val (mX, mY) = MapTileMath.latLngToMercator(marker.latitude, marker.longitude, intZoom.toDouble())
+                    val sortedMarkers = remember(markers, selectedMarkerId) {
+                        markers.mapIndexed { idx, m ->
+                            val isSel = m.isSelected || (selectedMarkerId != null && m.id == selectedMarkerId)
+                            Triple(idx, m, isSel)
+                        }.sortedBy { it.third } // Draw selected marker on top
+                    }
+
+                    sortedMarkers.forEach { (index, marker, isSelected) ->
+                        val (mX, mY) = MapTileMath.latLngToMercator(marker.latitude, marker.longitude, sourceTileZoom.toDouble())
                         val screenX = halfW + ((mX - centerMercX) * scale).toFloat()
                         val screenY = halfH + ((mY - centerMercY) * scale).toFloat()
 
-                        if (screenX >= -40f && screenX <= wPx + 40f && screenY >= -40f && screenY <= hPx + 40f) {
-                            val pinBg = when (marker.status) {
-                                "DELIVERED" -> Color(0xFF10B981)
-                                "COD" -> Color(0xFFF59E0B)
-                                else -> Color(0xFF0284C7)
-                            }
-
+                        if (screenX >= -50f && screenX <= wPx + 50f && screenY >= -50f && screenY <= hPx + 50f) {
                             key("marker-${marker.id}") {
-                                Box(
-                                    modifier = Modifier
-                                        .offset { IntOffset((screenX - 14.dp.toPx()).roundToInt(), (screenY - 14.dp.toPx()).roundToInt()) }
-                                        .clickable { onMarkerClick?.invoke(marker.id) },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = pinBg,
-                                        shadowElevation = 5.dp,
-                                        border = androidx.compose.foundation.BorderStroke(2.dp, Color.White),
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Text(
-                                                text = "${index + 1}",
-                                                color = Color.White,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                }
+                                MicroPinMarker(
+                                    marker = marker,
+                                    displayNumber = marker.sequenceNumber ?: (index + 1),
+                                    isSelected = isSelected,
+                                    screenX = screenX,
+                                    screenY = screenY,
+                                    onClick = { onMarkerClick?.invoke(marker.id) }
+                                )
                             }
                         }
                     }
                 }
 
-                // Layer 4: Rooftop crosshairs on map center (Picker Mode only)
+                // Layer 4: Precision Reticle Crosshairs with Center Opening (Picker Mode only)
                 if (isPickerMode) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val cx = size.width / 2f
                         val cy = size.height / 2f
-                        val crossLen = 14.dp.toPx()
+                        val crossLen = 16.dp.toPx()
+                        val gap = 4.dp.toPx()
                         val strokeColor = if (currentMapType == DropwayMapType.SATELLITE)
-                            Color.White.copy(alpha = 0.60f)
+                            Color.White.copy(alpha = 0.75f)
                         else
-                            Color.Black.copy(alpha = 0.35f)
+                            Color.Black.copy(alpha = 0.45f)
 
-                        drawLine(color = strokeColor, start = Offset(cx - crossLen, cy), end = Offset(cx + crossLen, cy), strokeWidth = 1.5f)
-                        drawLine(color = strokeColor, start = Offset(cx, cy - crossLen), end = Offset(cx, cy + crossLen), strokeWidth = 1.5f)
+                        val shadowColor = if (currentMapType == DropwayMapType.SATELLITE)
+                            Color.Black.copy(alpha = 0.40f)
+                        else
+                            Color.White.copy(alpha = 0.50f)
+
+                        // Outer contrast shadow strokes for visibility over light or dark roofs
+                        drawLine(color = shadowColor, start = Offset(cx - crossLen, cy + 1f), end = Offset(cx - gap, cy + 1f), strokeWidth = 2.5f)
+                        drawLine(color = shadowColor, start = Offset(cx + gap, cy + 1f), end = Offset(cx + crossLen, cy + 1f), strokeWidth = 2.5f)
+                        drawLine(color = shadowColor, start = Offset(cx + 1f, cy - crossLen), end = Offset(cx + 1f, cy - gap), strokeWidth = 2.5f)
+                        drawLine(color = shadowColor, start = Offset(cx + 1f, cy + gap), end = Offset(cx + 1f, cy + crossLen), strokeWidth = 2.5f)
+
+                        // Main reticle crosshairs
+                        drawLine(color = strokeColor, start = Offset(cx - crossLen, cy), end = Offset(cx - gap, cy), strokeWidth = 1.5f)
+                        drawLine(color = strokeColor, start = Offset(cx + gap, cy), end = Offset(cx + crossLen, cy), strokeWidth = 1.5f)
+                        drawLine(color = strokeColor, start = Offset(cx, cy - crossLen), end = Offset(cx, cy - gap), strokeWidth = 1.5f)
+                        drawLine(color = strokeColor, start = Offset(cx, cy + gap), end = Offset(cx, cy + crossLen), strokeWidth = 1.5f)
+
+                        // Center reticle ring: permits looking through the center at individual roof pixels
+                        drawCircle(color = strokeColor, radius = gap, style = Stroke(width = 1.2f))
                     }
                 }
             }
@@ -455,14 +531,33 @@ fun DropwayMapView(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // Live Coordinates HUD Pill
+                // Live Coordinates & Deep Zoom Status HUD Pill
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = DropwayNavy.copy(alpha = 0.92f),
                     shadowElevation = 4.dp
                 ) {
+                    val currentOverzoom = 2.0.pow(max(0.0, zoom - currentMapType.maxNativeZoom))
+                    val hudText = if (currentOverzoom > 1.05) {
+                        String.format(
+                            Locale.US,
+                            "พิกัด: %.6f, %.6f • ซูม %.1fx (ขยาย %.1fx)",
+                            currentLat,
+                            currentLng,
+                            zoom,
+                            currentOverzoom
+                        )
+                    } else {
+                        String.format(
+                            Locale.US,
+                            "พิกัด: %.6f, %.6f • ซูม %.1fx",
+                            currentLat,
+                            currentLng,
+                            zoom
+                        )
+                    }
                     Text(
-                        text = String.format(Locale.US, "พิกัด: %.5f, %.5f", currentLat, currentLng),
+                        text = hudText,
                         color = Color.White,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
@@ -633,34 +728,165 @@ fun DropwayMapView(
 }
 
 /**
- * Individual native raster tile composable.
- * Synchronously checks in-memory LruCache to eliminate any draw delay,
- * and asynchronously loads from disk or network via MapTileLoader.
+ * Precision Micro Pin Marker:
+ * Compact, translucent, numbered needle marker anchored directly to the destination coordinates.
+ * Prevents covering satellite rooftops while remaining clearly identifiable against dark/light roofs.
+ */
+@Composable
+private fun MicroPinMarker(
+    marker: MapMarkerItem,
+    displayNumber: Int,
+    isSelected: Boolean,
+    screenX: Float,
+    screenY: Float,
+    onClick: () -> Unit
+) {
+    val statusColor = when (marker.status) {
+        "DELIVERED" -> Color(0xFF10B981) // Emerald Green
+        "COD" -> Color(0xFFF59E0B)       // Warm Amber
+        else -> Color(0xFF0284C7)        // Dropway Sky Blue
+    }
+
+    val bodySize = if (isSelected) 24.dp else 20.dp
+    val needleHeight = if (isSelected) 5.dp else 4.dp
+    val needleWidth = if (isSelected) 8.dp else 6.dp
+    val totalHeight = bodySize + needleHeight
+
+    val bodyAlpha = if (isSelected) 0.90f else 0.58f
+    val needleAlpha = if (isSelected) 0.95f else 0.70f
+    val borderWidth = if (isSelected) 1.8.dp else 1.2.dp
+    val borderColor = if (isSelected) Color.White else Color.White.copy(alpha = 0.92f)
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .offset {
+                val wPx = bodySize.toPx()
+                val hPx = totalHeight.toPx()
+                IntOffset((screenX - wPx / 2f).roundToInt(), (screenY - hPx).roundToInt())
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+    ) {
+        // Translucent Circular Pin Body with Destination Sequence Number
+        Box(
+            modifier = Modifier
+                .size(bodySize)
+                .clip(CircleShape)
+                .background(statusColor.copy(alpha = bodyAlpha))
+                .border(borderWidth, borderColor, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "$displayNumber",
+                color = Color.White,
+                fontSize = if (isSelected) 11.sp else 10.sp,
+                fontWeight = FontWeight.ExtraBold,
+                textAlign = TextAlign.Center
+            )
+        }
+
+        // Precision Needle Tip
+        Canvas(
+            modifier = Modifier
+                .size(width = needleWidth, height = needleHeight)
+                .offset(y = (-1).dp)
+        ) {
+            val path = Path().apply {
+                moveTo(0f, 0f)
+                lineTo(size.width, 0f)
+                lineTo(size.width / 2f, size.height)
+                close()
+            }
+            drawPath(
+                path = path,
+                color = statusColor.copy(alpha = needleAlpha)
+            )
+            drawLine(
+                color = borderColor,
+                start = Offset(0f, 0f),
+                end = Offset(size.width / 2f, size.height),
+                strokeWidth = 1.dp.toPx()
+            )
+            drawLine(
+                color = borderColor,
+                start = Offset(size.width, 0f),
+                end = Offset(size.width / 2f, size.height),
+                strokeWidth = 1.dp.toPx()
+            )
+        }
+
+        // Micro ground contact point (centered on target coordinate)
+        Canvas(
+            modifier = Modifier
+                .size(3.dp)
+                .offset(y = (-1).dp)
+        ) {
+            drawCircle(
+                color = borderColor,
+                radius = size.width / 2f
+            )
+            drawCircle(
+                color = statusColor,
+                radius = size.width / 3.5f
+            )
+        }
+    }
+}
+
+/**
+ * Individual native raster tile composable with Quadtree progressive replacement.
+ * Synchronously checks in-memory LruCache (exact or ancestor parent) to eliminate any blank flashes,
+ * and asynchronously loads higher-resolution tiles in the background.
  */
 @Composable
 private fun NativeTileItem(
-    tileUrl: String,
+    mapType: DropwayMapType,
+    x: Int,
+    y: Int,
+    z: Int,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var bitmap by remember(tileUrl) { mutableStateOf<Bitmap?>(MapTileLoader.getMemoryBitmap(tileUrl)) }
+    val tileUrl = remember(mapType, x, y, z) { mapType.getTileUrl(x, y, z) }
+    var cachedItem by remember(tileUrl) {
+        mutableStateOf(
+            MapTileLoader.getMemoryBitmapOrParent(x, y, z) { tx, ty, tz ->
+                mapType.getTileUrl(tx, ty, tz)
+            }
+        )
+    }
 
     LaunchedEffect(tileUrl) {
-        if (bitmap == null) {
+        if (cachedItem?.srcRect != null || cachedItem == null) {
             val loaded = MapTileLoader.loadTile(context, tileUrl)
             if (loaded != null) {
-                bitmap = loaded
+                cachedItem = CachedTileBitmap(loaded, null)
             }
         }
     }
 
-    if (bitmap != null) {
-        Image(
-            bitmap = bitmap!!.asImageBitmap(),
-            contentDescription = null,
-            contentScale = ContentScale.FillBounds,
-            modifier = modifier
-        )
+    val item = cachedItem
+    if (item != null) {
+        val src = item.srcRect
+        if (src == null) {
+            Image(
+                bitmap = item.bitmap.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.FillBounds,
+                modifier = modifier
+            )
+        } else {
+            Canvas(modifier = modifier) {
+                drawIntoCanvas { canvas ->
+                    val dst = Rect(0, 0, size.width.toInt(), size.height.toInt())
+                    canvas.nativeCanvas.drawBitmap(item.bitmap, src, dst, null)
+                }
+            }
+        }
     }
 }
 

@@ -69,8 +69,8 @@ fun DeliveryMapScreen(
 
     val stopsWithGps = destinations.count { it.latitude != null && it.longitude != null }
 
-    val mapMarkers = remember(destinations) {
-        destinations.mapNotNull { p ->
+    val mapMarkers = remember(destinations, selectedParcelId) {
+        destinations.mapIndexedNotNull { index, p ->
             if (p.latitude != null && p.longitude != null) {
                 val statusStr = if (p.deliveryStatus == DeliveryStatus.DELIVERED) {
                     "DELIVERED"
@@ -85,7 +85,9 @@ fun DeliveryMapScreen(
                     longitude = p.longitude,
                     title = p.recipientName,
                     status = statusStr,
-                    subtitle = p.destinationAddress
+                    subtitle = p.destinationAddress,
+                    sequenceNumber = index + 1,
+                    isSelected = (p.id == selectedParcelId)
                 )
             } else null
         }
@@ -169,6 +171,7 @@ fun DeliveryMapScreen(
                 initialZoom = 14f,
                 isPickerMode = false,
                 markers = mapMarkers,
+                selectedMarkerId = selectedParcelId,
                 onMarkerClick = { clickedId ->
                     selectedParcelId = clickedId
                     val index = destinations.indexOfFirst { it.id == clickedId }

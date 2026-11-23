@@ -1,15 +1,25 @@
 package com.pocketdev.dropway.ui.components.map
 
+import android.graphics.Rect
 import kotlin.math.*
+
+data class QuadtreeParent(
+    val parentX: Int,
+    val parentY: Int,
+    val parentZ: Int,
+    val srcRect: Rect
+)
 
 /**
  * Web Mercator projection math and slippy map tile calculations,
  * based on the proven native raster tile architecture in Velnox Mobile.
+ *
+ * Supports deep satellite zoom up to Zoom 23.0 with centimeter-level precision.
  */
 object MapTileMath {
     const val TILE_SIZE = 256.0
     const val MIN_ZOOM = 3.0
-    const val MAX_ZOOM = 19.0
+    const val MAX_ZOOM = 23.0
     const val DEFAULT_ZOOM = 16.0
 
     /**
@@ -38,5 +48,26 @@ object MapTileMath {
         val latRad = atan(sinh(mercatorY * 2.0 * Math.PI))
         val lat = Math.toDegrees(latRad).coerceIn(-85.05112878, 85.05112878)
         return lat to clampedLng
+    }
+
+    /**
+     * Calculates the parent tile coordinates and the sub-rectangle within that parent tile
+     * covering this child tile. Used for instant progressive tile display while high-res tiles load.
+     */
+    fun getQuadtreeParent(x: Int, y: Int, z: Int, levelsUp: Int = 1): QuadtreeParent? {
+        if (z - levelsUp < 0) return null
+        val parentZ = z - levelsUp
+        val scale = 1 shl levelsUp
+        val parentX = x shr levelsUp
+        val parentY = y shr levelsUp
+
+        val subX = x and (scale - 1)
+        val subY = y and (scale - 1)
+        val subSize = (TILE_SIZE / scale).toInt()
+
+        val left = subX * subSize
+        val top = subY * subSize
+        val rect = Rect(left, top, left + subSize, top + subSize)
+        return QuadtreeParent(parentX, parentY, parentZ, rect)
     }
 }
