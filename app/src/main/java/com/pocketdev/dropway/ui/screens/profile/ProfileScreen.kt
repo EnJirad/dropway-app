@@ -172,7 +172,7 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("ℹ️ เกี่ยวกับ Dropway", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                    Text("เกี่ยวกับ Dropway", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = "Dropway — จำทุกบ้าน จัดการทุกพัสดุ ชัดเจนทุกบาท แม้ไม่มีเน็ต\nเวอร์ชัน 1.0.0 (Production Build)\nออกแบบมาสำหรับการจัดส่งพัสดุ 200–300 ชิ้นต่อวัน",
