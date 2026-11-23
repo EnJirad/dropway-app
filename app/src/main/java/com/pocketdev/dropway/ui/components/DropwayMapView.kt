@@ -12,6 +12,8 @@ import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
 import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -56,7 +58,7 @@ import java.util.Locale
  * Standard 2D map providers in Dropway:
  * 1. OpenStreetMap (Standard street map, roads, streets, place names, keyless)
  * 2. OpenFreeMap (Clean modern vector street map style, keyless)
- * 3. Maptoolkit (Detailed street map tiles, verified keyless)
+ * 3. Maptoolkit (Official community vector street map, keyless)
  */
 enum class DropwayMapType(val label: String, val layerKey: String) {
     OPEN_STREET_MAP("OpenStreetMap", "osm"),
@@ -171,6 +173,8 @@ fun DropwayMapView(
 
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var isWebViewReady by remember { mutableStateOf(false) }
+    var isTileLoaded by remember { mutableStateOf(false) }
+    var mapErrorMessage by remember { mutableStateOf<String?>(null) }
 
     var showStreetViewDialog by remember { mutableStateOf(false) }
 
@@ -183,7 +187,9 @@ fun DropwayMapView(
 
     // Sync provider layer switches
     LaunchedEffect(currentMapType) {
-        webViewRef?.evaluateJavascript("switchLayer('${currentMapType.layerKey}');", null)
+        isTileLoaded = false
+        mapErrorMessage = null
+        webViewRef?.evaluateJavascript("switchProvider('${currentMapType.layerKey}');", null)
     }
 
     // Sync markers in WebView Map (viewer mode only)
@@ -216,7 +222,9 @@ fun DropwayMapView(
     class AndroidBridge(
         private val onMoved: ((Double, Double) -> Unit)?,
         private val onMarkerSelected: ((Long) -> Unit)?,
-        private val onLoaded: () -> Unit
+        private val onLoaded: () -> Unit,
+        private val onTileSuccess: (String) -> Unit,
+        private val onError: (String, String) -> Unit
     ) {
         private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -251,7 +259,21 @@ fun DropwayMapView(
         }
 
         @JavascriptInterface
-        fun onMapError(@Suppress("UNUSED_PARAMETER") error: String) {}
+        fun onTileLoaded(provider: String) {
+            mainHandler.post {
+                isTileLoaded = true
+                mapErrorMessage = null
+                onTileSuccess(provider)
+            }
+        }
+
+        @JavascriptInterface
+        fun onMapError(provider: String, errorMsg: String) {
+            mainHandler.post {
+                Log.e("DropwayMapWV", "Map Error ($provider): $errorMsg")
+                onError(provider, errorMsg)
+            }
+        }
     }
 
     Box(
@@ -260,7 +282,7 @@ fun DropwayMapView(
             .border(1.5.dp, Color(0xFFCBD5E1), RoundedCornerShape(18.dp))
             .background(Color(0xFFF1F5F9))
     ) {
-        // 2D Map Engine: Keyless Leaflet WebView Map (OpenStreetMap / OpenFreeMap / Maptoolkit)
+        // 2D Map Engine: Keyless MapLibre GL JS WebView Map (OpenStreetMap / OpenFreeMap / Maptoolkit)
         AndroidView(
             factory = { ctx ->
                 WebView(ctx).apply {
@@ -293,13 +315,21 @@ fun DropwayMapView(
                         },
                         onMarkerSelected = onMarkerClick,
                         onLoaded = {
-                            evaluateJavascript(
-                                "setupMap($initialLat, $initialLng, ${initialZoom.toInt()}, $isPickerMode, '${currentMapType.layerKey}');",
-                                null
-                            )
                             if (!isPickerMode) {
                                 updateMarkersInWebView(this)
                             }
+                        },
+                        onTileSuccess = {
+                            isTileLoaded = true
+                            mapErrorMessage = null
+                        },
+                        onError = { provider, msg ->
+                            val cleanMsg = when {
+                                msg.contains("Failed to fetch", ignoreCase = true) -> "เชื่อมต่ออินเทอร์เน็ตไม่ได้"
+                                msg.contains("WebGL", ignoreCase = true) -> "อุปกรณ์ไม่รองรับ WebGL"
+                                else -> "โหลดไม่สำเร็จ กรุณาสลับผู้ให้บริการ"
+                            }
+                            mapErrorMessage = "$provider: $cleanMsg"
                         }
                     )
                     addJavascriptInterface(bridge, "AndroidBridge")
@@ -312,6 +342,34 @@ fun DropwayMapView(
 
                         override fun onReceivedError(view: WebView?, errorCode: Int, description: String?, failingUrl: String?) {
                             Log.e("DropwayMapWV", "WebView Error ($errorCode): $description at $failingUrl")
+                            mapErrorMessage = "ไม่สามารถโหลดแผนที่ได้ ($description)"
+                        }
+
+                        override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                            val url = request?.url ?: return null
+                            val host = url.host ?: return null
+
+                            // Intercept OpenStreetMap tile requests to ensure compliant User-Agent and Referer headers
+                            if (host == "tile.openstreetmap.org" || host.endsWith(".tile.openstreetmap.org")) {
+                                try {
+                                    val conn = java.net.URL(url.toString()).openConnection() as java.net.HttpURLConnection
+                                    conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36 DropwayDeliveryApp/1.0 (contact: support@dropway.app)")
+                                    conn.setRequestProperty("Referer", "https://dropway.app/")
+                                    conn.connectTimeout = 8000
+                                    conn.readTimeout = 8000
+                                    conn.instanceFollowRedirects = true
+                                    val code = conn.responseCode
+                                    if (code == 200) {
+                                        val mimeType = conn.contentType?.substringBefore(';') ?: "image/png"
+                                        return WebResourceResponse(mimeType, "UTF-8", conn.inputStream)
+                                    } else {
+                                        Log.w("DropwayMapWV", "OSM tile returned HTTP $code for $url")
+                                    }
+                                } catch (e: Exception) {
+                                    Log.w("DropwayMapWV", "OSM tile intercept error: ${e.message}")
+                                }
+                            }
+                            return super.shouldInterceptRequest(view, request)
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
@@ -343,9 +401,9 @@ fun DropwayMapView(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Loading Overlay
+        // Loading Overlay (smoothly dismissed when first tile renders)
         AnimatedVisibility(
-            visible = !isWebViewReady,
+            visible = (!isWebViewReady || !isTileLoaded) && mapErrorMessage == null,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.Center)
@@ -371,6 +429,61 @@ fun DropwayMapView(
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
+                }
+            }
+        }
+
+        // Error Diagnostic Banner (when a provider fails to load)
+        if (mapErrorMessage != null && !isTileLoaded) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 24.dp),
+                shape = RoundedCornerShape(16.dp),
+                color = Color(0xFFFEF2F2),
+                shadowElevation = 6.dp,
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFECACA))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_warning),
+                            contentDescription = null,
+                            tint = Color(0xFFDC2626),
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "ไม่สามารถแสดงผล ${currentMapType.label}",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = Color(0xFF991B1B)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = mapErrorMessage ?: "กรุณาแตะเลือกผู้ให้บริการอื่นที่เมนูด้านบน",
+                        fontSize = 11.sp,
+                        color = Color(0xFFB91C1C)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                mapErrorMessage = null
+                                isTileLoaded = false
+                                webViewRef?.evaluateJavascript("switchProvider('${currentMapType.layerKey}');", null)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary),
+                            shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text("ลองใหม่", fontSize = 11.sp)
+                        }
+                    }
                 }
             }
         }
@@ -427,7 +540,9 @@ fun DropwayMapView(
                             color = if (isSelected) DropwayPrimary else Color.Transparent,
                             modifier = Modifier.clickable {
                                 currentMapType = type
-                                webViewRef?.evaluateJavascript("switchLayer('${type.layerKey}');", null)
+                                isTileLoaded = false
+                                mapErrorMessage = null
+                                webViewRef?.evaluateJavascript("switchProvider('${type.layerKey}');", null)
                             }
                         ) {
                             Row(
