@@ -43,12 +43,15 @@ import java.util.Locale
 @Composable
 fun rememberStreetViewPanoramaViewWithLifecycle(): StreetViewPanoramaView {
     val context = LocalContext.current
-    val streetView = remember { StreetViewPanoramaView(context) }
+    val streetView = remember {
+        StreetViewPanoramaView(context).apply {
+            onCreate(Bundle())
+        }
+    }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, streetView) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_CREATE -> streetView.onCreate(Bundle())
                 Lifecycle.Event.ON_START -> streetView.onStart()
                 Lifecycle.Event.ON_RESUME -> streetView.onResume()
                 Lifecycle.Event.ON_PAUSE -> streetView.onPause()
@@ -58,8 +61,17 @@ fun rememberStreetViewPanoramaViewWithLifecycle(): StreetViewPanoramaView {
             }
         }
         lifecycle.addObserver(observer)
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            streetView.onStart()
+        }
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            streetView.onResume()
+        }
         onDispose {
             lifecycle.removeObserver(observer)
+            streetView.onPause()
+            streetView.onStop()
+            streetView.onDestroy()
         }
     }
     return streetView
@@ -89,7 +101,7 @@ fun DropwayStreetViewDialog(
     // Fallback timeout in case no Street View imagery exists for this coordinate
     LaunchedEffect(currentRadius, latitude, longitude) {
         isLoading = true
-        delay(6000L)
+        delay(10000L) // 10-second timeout detection
         if (isLoading && isCoverageAvailable != true) {
             isLoading = false
             isCoverageAvailable = false
@@ -186,7 +198,7 @@ fun DropwayStreetViewDialog(
                                     panorama.isStreetNamesEnabled = true
 
                                     panorama.setOnStreetViewPanoramaChangeListener { location: StreetViewPanoramaLocation? ->
-                                        if (location == null || location.position == null) {
+                                        if (location == null) {
                                             isCoverageAvailable = false
                                             isLoading = false
                                         } else {
@@ -289,7 +301,7 @@ fun DropwayStreetViewDialog(
 
                                     Spacer(modifier = Modifier.height(20.dp))
 
-                                    if (currentRadius <= 100) {
+                                    if (currentRadius <= 50) {
                                         OutlinedButton(
                                             onClick = {
                                                 currentRadius = 150
@@ -308,6 +320,27 @@ fun DropwayStreetViewDialog(
                                             )
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text("ค้นหาถนนใกล้เคียง (รัศมี 150 ม.)", fontWeight = FontWeight.Bold)
+                                        }
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                    } else if (currentRadius <= 150) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                currentRadius = 300
+                                                isLoading = true
+                                                isCoverageAvailable = null
+                                                panoramaRef?.setPosition(LatLng(latitude, longitude), 300)
+                                            },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Icon(
+                                                painter = painterResource(id = R.drawable.ic_search),
+                                                contentDescription = null,
+                                                tint = DropwayPrimary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("ค้นหาถนนใกล้เคียง (รัศมี 300 ม.)", fontWeight = FontWeight.Bold)
                                         }
                                         Spacer(modifier = Modifier.height(10.dp))
                                     }

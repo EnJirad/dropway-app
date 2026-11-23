@@ -1,6 +1,8 @@
 package com.pocketdev.dropway.ui.components
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -25,11 +27,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.GoogleApiAvailability
+import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.GoogleMap
+import com.google.android.gms.maps.MapView
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.LatLng
+import com.google.android.gms.maps.model.MarkerOptions
+import com.pocketdev.dropway.BuildConfig
 import com.pocketdev.dropway.R
 import com.pocketdev.dropway.core.util.LocationUtils
 import com.pocketdev.dropway.core.util.NetworkUtils
@@ -55,9 +69,82 @@ data class MapMarkerItem(
 )
 
 /**
- * Interactive map viewer rendering real Google Satellite Hybrid, Normal Road,
- * Satellite, and Terrain map tiles with zero external API key requirements.
- * Connects directly to native Google Street View 360° panorama viewer.
+ * Helper to determine whether the official Google Maps Android SDK is configured
+ * with a valid API key and Google Play Services is available on the device.
+ */
+object GoogleMapsHelper {
+    fun isApiKeyConfigured(): Boolean {
+        val key = try {
+            BuildConfig.GOOGLE_MAPS_API_KEY.trim()
+        } catch (_: Throwable) {
+            ""
+        }
+        return key.isNotEmpty() &&
+                key != "YOUR_API_KEY_HERE" &&
+                !key.contains("API_KEY") &&
+                key.length > 10
+    }
+
+    fun isPlayServicesAvailable(context: Context): Boolean {
+        return try {
+            val availability = GoogleApiAvailability.getInstance()
+            val result = availability.isGooglePlayServicesAvailable(context)
+            result == ConnectionResult.SUCCESS
+        } catch (_: Throwable) {
+            false
+        }
+    }
+
+    fun isGoogleMapsSdkUsable(context: Context): Boolean {
+        return isApiKeyConfigured() && isPlayServicesAvailable(context)
+    }
+}
+
+@Composable
+fun rememberMapViewWithLifecycle(): MapView {
+    val context = LocalContext.current
+    val mapView = remember {
+        MapView(context).apply {
+            onCreate(Bundle())
+        }
+    }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle, mapView) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> mapView.onStart()
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                Lifecycle.Event.ON_STOP -> mapView.onStop()
+                Lifecycle.Event.ON_DESTROY -> mapView.onDestroy()
+                else -> {}
+            }
+        }
+        lifecycle.addObserver(observer)
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            mapView.onStart()
+        }
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            mapView.onResume()
+        }
+        onDispose {
+            lifecycle.removeObserver(observer)
+            mapView.onPause()
+            mapView.onStop()
+            mapView.onDestroy()
+        }
+    }
+    return mapView
+}
+
+/**
+ * Dual-Engine Map Viewer:
+ * 1. Primary: Official Google Maps Android SDK (when configured with valid key and Google Play Services).
+ * 2. Compliant Fallback: Leaflet WebView using OpenStreetMap, Esri World Imagery, and OpenTopoMap
+ *    with proper attributions and zero Google tile scraping.
+ *
+ * Provides real Google Street View 360° launcher, layer switching, HUD pill,
+ * fixed center pin in picker mode, and colored markers in viewer mode.
  * Strictly adheres to the zero-emoji policy.
  */
 @SuppressLint("SetJavaScriptEnabled")
@@ -74,14 +161,23 @@ fun DropwayMapView(
 ) {
     val context = LocalContext.current
     val isOnline = remember { NetworkUtils.isNetworkAvailable(context) }
-    var currentMapType by remember { mutableStateOf(DropwayMapType.HYBRID) } // Default to Satellite Hybrid for roof & street view
+    val useGoogleMaps = remember { GoogleMapsHelper.isGoogleMapsSdkUsable(context) }
+
+    var currentMapType by remember { mutableStateOf(DropwayMapType.HYBRID) }
     var currentLat by remember { mutableStateOf(initialLat) }
     var currentLng by remember { mutableStateOf(initialLng) }
+
+    // Google Maps SDK state
+    var googleMapRef by remember { mutableStateOf<GoogleMap?>(null) }
+    var isGoogleMapReady by remember { mutableStateOf(false) }
+
+    // WebView Fallback state
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    var isMapReady by remember { mutableStateOf(false) }
+    var isWebViewReady by remember { mutableStateOf(false) }
+
     var showStreetViewDialog by remember { mutableStateOf(false) }
 
-    // Pre-load self-contained map html with inlined leaflet assets
+    // Pre-load map html
     val mapHtml = remember {
         try {
             context.assets.open("map.html").bufferedReader().use { it.readText() }
@@ -90,8 +186,100 @@ fun DropwayMapView(
         }
     }
 
+    // Sync external coordinate changes (e.g. city presets)
+    LaunchedEffect(initialLat, initialLng) {
+        currentLat = initialLat
+        currentLng = initialLng
+        if (useGoogleMaps) {
+            googleMapRef?.let { gMap ->
+                val curPos = gMap.cameraPosition.target
+                if (Math.abs(curPos.latitude - initialLat) > 0.0001 || Math.abs(curPos.longitude - initialLng) > 0.0001) {
+                    gMap.animateCamera(CameraUpdateFactory.newLatLng(LatLng(initialLat, initialLng)))
+                }
+            }
+        } else {
+            webViewRef?.evaluateJavascript("setMapView($initialLat, $initialLng, ${initialZoom.toInt()});", null)
+        }
+    }
+
+    // Sync layer switches
+    LaunchedEffect(currentMapType) {
+        if (useGoogleMaps) {
+            googleMapRef?.let { gMap ->
+                gMap.mapType = when (currentMapType) {
+                    DropwayMapType.HYBRID -> GoogleMap.MAP_TYPE_HYBRID
+                    DropwayMapType.ROAD -> GoogleMap.MAP_TYPE_NORMAL
+                    DropwayMapType.SATELLITE -> GoogleMap.MAP_TYPE_SATELLITE
+                    DropwayMapType.TERRAIN -> GoogleMap.MAP_TYPE_TERRAIN
+                }
+            }
+        } else {
+            webViewRef?.evaluateJavascript("switchLayer('${currentMapType.layerKey}');", null)
+        }
+    }
+
+    // Sync markers in Google Map
+    fun syncGoogleMapMarkers(gMap: GoogleMap) {
+        if (isPickerMode) return
+        gMap.clear()
+        markers.forEach { m ->
+            val hue = when (m.status) {
+                "DELIVERED" -> BitmapDescriptorFactory.HUE_GREEN
+                "COD" -> BitmapDescriptorFactory.HUE_ORANGE
+                else -> BitmapDescriptorFactory.HUE_AZURE
+            }
+            val marker = gMap.addMarker(
+                MarkerOptions()
+                    .position(LatLng(m.latitude, m.longitude))
+                    .title(m.title)
+                    .snippet(m.subtitle)
+                    .icon(BitmapDescriptorFactory.defaultMarker(hue))
+            )
+            marker?.tag = m.id
+        }
+        gMap.setOnMarkerClickListener { marker ->
+            val id = marker.tag as? Long
+            if (id != null) {
+                onMarkerClick?.invoke(id)
+            }
+            false
+        }
+    }
+
+    LaunchedEffect(markers, isGoogleMapReady) {
+        if (useGoogleMaps && isGoogleMapReady && !isPickerMode) {
+            googleMapRef?.let { syncGoogleMapMarkers(it) }
+        }
+    }
+
+    // Sync markers in WebView Fallback Map
+    fun updateMarkersInWebView(wv: WebView?) {
+        if (wv == null || isPickerMode) return
+        try {
+            val arr = JSONArray()
+            markers.forEach { m ->
+                val obj = JSONObject()
+                obj.put("id", m.id.toString())
+                obj.put("latitude", m.latitude)
+                obj.put("longitude", m.longitude)
+                obj.put("title", m.title)
+                obj.put("status", m.status)
+                obj.put("subtitle", m.subtitle)
+                arr.put(obj)
+            }
+            val js = "updateMarkers(${arr.toString()});"
+            wv.evaluateJavascript(js, null)
+        } catch (_: Exception) {}
+    }
+
+    LaunchedEffect(markers, isWebViewReady) {
+        if (!useGoogleMaps && isWebViewReady && !isPickerMode) {
+            updateMarkersInWebView(webViewRef)
+        }
+    }
+
     // Bridge for JS to Android communication (Dispatched to Main Thread)
-    class AndroidMapBridge(
+    class AndroidBridge(
         private val onMoved: ((Double, Double) -> Unit)?,
         private val onMarkerSelected: ((Long) -> Unit)?,
         private val onLoaded: () -> Unit
@@ -116,36 +304,20 @@ fun DropwayMapView(
         }
 
         @JavascriptInterface
-        fun onMapReady() {
+        fun onMapLoaded() {
             mainHandler.post {
-                isMapReady = true
+                isWebViewReady = true
                 onLoaded()
             }
         }
-    }
 
-    fun updateMarkers(wv: WebView?) {
-        if (wv == null || isPickerMode) return
-        try {
-            val arr = JSONArray()
-            markers.forEach { m ->
-                val obj = JSONObject()
-                obj.put("id", m.id.toString())
-                obj.put("lat", m.latitude)
-                obj.put("lng", m.longitude)
-                obj.put("title", m.title)
-                obj.put("status", m.status)
-                arr.put(obj)
-            }
-            val js = "setMarkers(${arr.toString()});"
-            wv.evaluateJavascript(js, null)
-        } catch (_: Exception) {}
-    }
-
-    LaunchedEffect(markers, isMapReady) {
-        if (isMapReady && !isPickerMode) {
-            updateMarkers(webViewRef)
+        @JavascriptInterface
+        fun onMapReady() {
+            onMapLoaded()
         }
+
+        @JavascriptInterface
+        fun onMapError(@Suppress("UNUSED_PARAMETER") error: String) {}
     }
 
     Box(
@@ -154,23 +326,62 @@ fun DropwayMapView(
             .border(1.5.dp, Color(0xFFCBD5E1), RoundedCornerShape(18.dp))
             .background(Color(0xFFF1F5F9))
     ) {
-        // High-resolution Satellite & Road Leaflet WebView
-        AndroidView(
-            factory = { ctx ->
-                WebView(ctx).apply {
-                    setLayerType(View.LAYER_TYPE_HARDWARE, null)
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        cacheMode = WebSettings.LOAD_DEFAULT
-                        useWideViewPort = true
-                        loadWithOverviewMode = true
-                        builtInZoomControls = false
-                        displayZoomControls = false
-                    }
+        if (useGoogleMaps) {
+            // Engine 1: Native Google Maps SDK MapView
+            val mapView = rememberMapViewWithLifecycle()
+            AndroidView(
+                factory = {
+                    mapView.apply {
+                        getMapAsync { gMap ->
+                            googleMapRef = gMap
+                            gMap.mapType = when (currentMapType) {
+                                DropwayMapType.HYBRID -> GoogleMap.MAP_TYPE_HYBRID
+                                DropwayMapType.ROAD -> GoogleMap.MAP_TYPE_NORMAL
+                                DropwayMapType.SATELLITE -> GoogleMap.MAP_TYPE_SATELLITE
+                                DropwayMapType.TERRAIN -> GoogleMap.MAP_TYPE_TERRAIN
+                            }
+                            gMap.uiSettings.apply {
+                                isZoomControlsEnabled = false
+                                isCompassEnabled = false
+                                isMyLocationButtonEnabled = false
+                                isMapToolbarEnabled = false
+                            }
+                            val startPos = LatLng(initialLat, initialLng)
+                            gMap.moveCamera(CameraUpdateFactory.newLatLngZoom(startPos, initialZoom))
 
-                    addJavascriptInterface(
-                        AndroidMapBridge(
+                            if (isPickerMode) {
+                                gMap.setOnCameraMoveListener {
+                                    val target = gMap.cameraPosition.target
+                                    currentLat = target.latitude
+                                    currentLng = target.longitude
+                                    onCoordinatesChanged?.invoke(target.latitude, target.longitude)
+                                }
+                            } else {
+                                syncGoogleMapMarkers(gMap)
+                            }
+                            isGoogleMapReady = true
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            // Engine 2: Compliant Leaflet WebView Map (OpenStreetMap / Esri / OpenTopoMap)
+            AndroidView(
+                factory = { ctx ->
+                    WebView(ctx).apply {
+                        setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                        settings.apply {
+                            javaScriptEnabled = true
+                            domStorageEnabled = true
+                            cacheMode = WebSettings.LOAD_DEFAULT
+                            useWideViewPort = true
+                            loadWithOverviewMode = true
+                            builtInZoomControls = false
+                            displayZoomControls = false
+                        }
+
+                        val bridge = AndroidBridge(
                             onMoved = { lat, lng ->
                                 if (isPickerMode) {
                                     onCoordinatesChanged?.invoke(lat, lng)
@@ -178,38 +389,46 @@ fun DropwayMapView(
                             },
                             onMarkerSelected = onMarkerClick,
                             onLoaded = {
-                                evaluateJavascript("initMap($initialLat, $initialLng, ${initialZoom.toInt()}, '${currentMapType.layerKey}');", null)
+                                evaluateJavascript(
+                                    "setupMap($initialLat, $initialLng, ${initialZoom.toInt()}, $isPickerMode, '${currentMapType.layerKey}');",
+                                    null
+                                )
                                 if (!isPickerMode) {
-                                    updateMarkers(this)
+                                    updateMarkersInWebView(this)
                                 }
                             }
-                        ),
-                        "AndroidMap"
-                    )
+                        )
+                        addJavascriptInterface(bridge, "AndroidBridge")
+                        addJavascriptInterface(bridge, "AndroidMap")
 
-                    webViewClient = object : WebViewClient() {
-                        override fun onPageFinished(view: WebView?, url: String?) {
-                            super.onPageFinished(view, url)
-                            view?.evaluateJavascript("initMap($initialLat, $initialLng, ${initialZoom.toInt()}, '${currentMapType.layerKey}');", null)
-                            if (!isPickerMode) {
-                                updateMarkers(view)
+                        webViewClient = object : WebViewClient() {
+                            override fun onPageFinished(view: WebView?, url: String?) {
+                                super.onPageFinished(view, url)
+                                view?.evaluateJavascript(
+                                    "setupMap($initialLat, $initialLng, ${initialZoom.toInt()}, $isPickerMode, '${currentMapType.layerKey}');",
+                                    null
+                                )
+                                if (!isPickerMode) {
+                                    updateMarkersInWebView(view)
+                                }
                             }
                         }
+
+                        loadDataWithBaseURL("https://dropway.local", mapHtml, "text/html", "UTF-8", null)
+                        webViewRef = this
                     }
+                },
+                update = { wv ->
+                    webViewRef = wv
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
-                    loadDataWithBaseURL("https://dropway.local", mapHtml, "text/html", "UTF-8", null)
-                    webViewRef = this
-                }
-            },
-            update = { wv ->
-                webViewRef = wv
-            },
-            modifier = Modifier.fillMaxSize()
-        )
-
-        // Loading Overlay until Map is initialized
+        // Loading Overlay
+        val isMapLoaded = if (useGoogleMaps) isGoogleMapReady else isWebViewReady
         AnimatedVisibility(
-            visible = !isMapReady,
+            visible = !isMapLoaded,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.Center)
@@ -230,7 +449,7 @@ fun DropwayMapView(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "กำลังโหลดแผนที่ดาวเทียม...",
+                        text = if (useGoogleMaps) "กำลังโหลด Google Maps..." else "กำลังโหลดแผนที่ดาวเทียม...",
                         color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
@@ -255,7 +474,6 @@ fun DropwayMapView(
                         tint = DropwayPrimary,
                         modifier = Modifier.size(44.dp)
                     )
-                    // Drop shadow under pin tip
                     Canvas(
                         modifier = Modifier
                             .size(14.dp, 6.dp)
@@ -288,7 +506,6 @@ fun DropwayMapView(
                         color = if (isSelected) DropwayPrimary else Color.Transparent,
                         modifier = Modifier.clickable {
                             currentMapType = type
-                            webViewRef?.evaluateJavascript("switchLayer('${type.layerKey}');", null)
                         }
                     ) {
                         Row(
@@ -338,7 +555,7 @@ fun DropwayMapView(
             )
         }
 
-        // Offline Warning Banner (if no internet)
+        // Offline Warning Banner
         if (!isOnline) {
             Surface(
                 modifier = Modifier
@@ -370,7 +587,7 @@ fun DropwayMapView(
             }
         }
 
-        // Floating Action Buttons (Right Side: Zoom +, Zoom -, My Location, Google Maps App, Native Street View)
+        // Floating Action Buttons (Right Side)
         Column(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
@@ -382,22 +599,48 @@ fun DropwayMapView(
             FloatingRoundButton(
                 iconRes = R.drawable.ic_add,
                 contentDescription = "ซูมเข้า",
-                onClick = { webViewRef?.evaluateJavascript("zoomIn();", null) }
+                onClick = {
+                    if (useGoogleMaps) {
+                        googleMapRef?.animateCamera(CameraUpdateFactory.zoomIn())
+                    } else {
+                        webViewRef?.evaluateJavascript("zoomIn();", null)
+                    }
+                }
             )
 
             // Zoom Out
             FloatingRoundButton(
                 iconRes = R.drawable.ic_minus,
                 contentDescription = "ซูมออก",
-                onClick = { webViewRef?.evaluateJavascript("zoomOut();", null) }
+                onClick = {
+                    if (useGoogleMaps) {
+                        googleMapRef?.animateCamera(CameraUpdateFactory.zoomOut())
+                    } else {
+                        webViewRef?.evaluateJavascript("zoomOut();", null)
+                    }
+                }
             )
 
-            // GPS Current Location / Reset
+            // GPS Current / Initial Position Reset
             FloatingRoundButton(
                 iconRes = R.drawable.ic_my_location,
                 contentDescription = "ตำแหน่งเริ่มต้น",
                 onClick = {
-                    webViewRef?.evaluateJavascript("setCenter($initialLat, $initialLng);", null)
+                    currentLat = initialLat
+                    currentLng = initialLng
+                    if (useGoogleMaps) {
+                        googleMapRef?.animateCamera(
+                            CameraUpdateFactory.newLatLngZoom(LatLng(initialLat, initialLng), initialZoom)
+                        )
+                    } else {
+                        webViewRef?.evaluateJavascript(
+                            "setMapView($initialLat, $initialLng, ${initialZoom.toInt()});",
+                            null
+                        )
+                    }
+                    if (isPickerMode) {
+                        onCoordinatesChanged?.invoke(initialLat, initialLng)
+                    }
                 }
             )
 
@@ -411,7 +654,7 @@ fun DropwayMapView(
                 }
             )
 
-            // Real Google Street View 360° Panorama Launcher (In-App Native Viewer)
+            // Real Google Street View 360° Panorama Launcher
             FloatingRoundButton(
                 iconRes = R.drawable.ic_street_view,
                 contentDescription = "ดูภาพถนนจริง Street View",
@@ -455,7 +698,7 @@ fun DropwayMapView(
         }
     }
 
-    // In-App Native Google Street View 360° Panorama Dialog (Untouched from 3d7172f)
+    // In-App Native Google Street View 360° Panorama Dialog
     if (showStreetViewDialog) {
         DropwayStreetViewDialog(
             latitude = currentLat,

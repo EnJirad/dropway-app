@@ -704,9 +704,9 @@ html, body {
     font-family: sans-serif;
     transition: transform 0.2s;
 }
-.pin-delivered { background: #059669; }
-.pin-cod { background: #d97706; }
-.pin-pending { background: #0284c7; }
+.pin-delivered { background: #10B981; }
+.pin-cod { background: #F59E0B; }
+.pin-pending { background: #0284C7; }
     </style>
     <script>
 /* @preserve
@@ -721,19 +721,135 @@ html, body {
     <div id="map"></div>
     <script>
         var map = null;
-        var googleRoadLayer = null;
-        var cartoStreetLayer = null;
-        var osmStreetLayer = null;
-        var googleSatLayer = null;
+        var osmRoadLayer = null;
+        var cartoRoadLayer = null;
         var esriSatLayer = null;
+        var cartoLabelsLayer = null;
+        var topoLayer = null;
         var currentMarkers = [];
-        var currentLayerType = 'street';
+        var currentLayerType = 'hybrid';
+        var isPickerMode = false;
+
+        function getBridge() {
+            return window.AndroidBridge || window.AndroidMap || null;
+        }
+
+        function notifyCenterMoved(lat, lng) {
+            var b = getBridge();
+            if (b && b.onCenterMoved) {
+                b.onCenterMoved(lat, lng);
+            }
+        }
+
+        function notifyMarkerSelected(id) {
+            var b = getBridge();
+            if (b && b.onMarkerSelected) {
+                b.onMarkerSelected(String(id));
+            }
+        }
+
+        function notifyMapLoaded() {
+            var b = getBridge();
+            if (b) {
+                if (b.onMapLoaded) b.onMapLoaded();
+                else if (b.onMapReady) b.onMapReady();
+            }
+        }
+
+        function notifyMapError(msg) {
+            var b = getBridge();
+            if (b && b.onMapError) {
+                b.onMapError(String(msg));
+            }
+        }
+
+        function initTileLayers() {
+            if (osmRoadLayer) return;
+
+            // OpenStreetMap Standard Road (Compliant fallback)
+            osmRoadLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            });
+
+            // CartoDB Voyager (Clean road fallback)
+            cartoRoadLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                subdomains: 'abcd',
+                maxZoom: 19,
+                attribution: '&copy; OpenStreetMap &copy; CARTO'
+            });
+
+            // Esri World Imagery (Satellite tiles)
+            esriSatLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                attribution: 'Tiles &copy; Esri'
+            });
+
+            // CartoDB Voyager Labels Only (for Hybrid view)
+            cartoLabelsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager_only_labels/{z}/{x}/{y}{r}.png', {
+                subdomains: 'abcd',
+                maxZoom: 19,
+                pane: 'labelsPane'
+            });
+
+            // OpenTopoMap (Terrain fallback)
+            topoLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+                subdomains: 'abc',
+                maxZoom: 17,
+                attribution: 'Map data &copy; OpenStreetMap, SRTM | style &copy; OpenTopoMap'
+            });
+
+            // Fallback error hooks
+            osmRoadLayer.on('tileerror', function() {
+                if (map && currentLayerType === 'road' && !map.hasLayer(cartoRoadLayer)) {
+                    map.addLayer(cartoRoadLayer);
+                }
+            });
+            topoLayer.on('tileerror', function() {
+                if (map && currentLayerType === 'terrain' && !map.hasLayer(osmRoadLayer)) {
+                    map.addLayer(osmRoadLayer);
+                }
+            });
+        }
+
+        function removeAllTileLayers() {
+            if (!map) return;
+            var all = [osmRoadLayer, cartoRoadLayer, esriSatLayer, cartoLabelsLayer, topoLayer];
+            for (var i = 0; i < all.length; i++) {
+                if (all[i] && map.hasLayer(all[i])) {
+                    map.removeLayer(all[i]);
+                }
+            }
+        }
+
+        function switchLayer(type) {
+            currentLayerType = type || 'hybrid';
+            if (!map) return;
+            initTileLayers();
+            removeAllTileLayers();
+
+            if (currentLayerType === 'road') {
+                map.addLayer(osmRoadLayer);
+            } else if (currentLayerType === 'satellite') {
+                map.addLayer(esriSatLayer);
+            } else if (currentLayerType === 'terrain') {
+                map.addLayer(topoLayer);
+            } else {
+                // Default: Hybrid (Satellite + Labels)
+                map.addLayer(esriSatLayer);
+                if (cartoLabelsLayer) {
+                    map.addLayer(cartoLabelsLayer);
+                }
+            }
+            setTimeout(function() { if (map) map.invalidateSize(true); }, 50);
+        }
 
         function setupMap(lat, lng, zoom, isPicker, layerType) {
-            lat = lat || 18.7883;
-            lng = lng || 98.9853;
-            zoom = zoom || 16;
-            currentLayerType = layerType || currentLayerType || 'street';
+            lat = (typeof lat === 'number') ? lat : 18.7883;
+            lng = (typeof lng === 'number') ? lng : 98.9853;
+            zoom = (typeof zoom === 'number') ? zoom : 16;
+            currentLayerType = layerType || currentLayerType || 'hybrid';
+            isPickerMode = !!isPicker;
 
             if (map) {
                 map.setView([lat, lng], zoom || map.getZoom());
@@ -748,94 +864,31 @@ html, body {
                 return;
             }
 
-            // Google Road (ถนน) with Thai language
-            googleRoadLayer = L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&hl=th', {
-                subdomains: '0123',
-                maxZoom: 20
-            });
-
-            // CartoDB Voyager (Street Fallback 1)
-            cartoStreetLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-                subdomains: 'abcd',
-                maxZoom: 19
-            });
-
-            // OpenStreetMap (Street Fallback 2)
-            osmStreetLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                subdomains: 'abc',
-                maxZoom: 19
-            });
-
-            // Google Hybrid Satellite (ดาวเทียม + ถนน + ป้ายชื่อ)
-            googleSatLayer = L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}&hl=th', {
-                subdomains: '0123',
-                maxZoom: 20
-            });
-
-            // Pure Satellite (ดาวเทียมแท้)
-            pureSatLayer = L.tileLayer('https://mt{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-                subdomains: '0123',
-                maxZoom: 20
-            });
-
-            // Google Terrain (ภูมิประเทศ)
-            terrainLayer = L.tileLayer('https://mt{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}&hl=th', {
-                subdomains: '0123',
-                maxZoom: 20
-            });
-
-            // Esri World Imagery (Satellite Fallback)
-            esriSatLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                maxZoom: 19
-            });
-
-            // Fallback hooks
-            googleRoadLayer.on('tileerror', function() {
-                if (map && currentLayerType === 'road' && !map.hasLayer(cartoStreetLayer)) {
-                    map.addLayer(cartoStreetLayer);
-                }
-            });
-            cartoStreetLayer.on('tileerror', function() {
-                if (map && currentLayerType === 'road' && !map.hasLayer(osmStreetLayer)) {
-                    map.addLayer(osmStreetLayer);
-                }
-            });
-            googleSatLayer.on('tileerror', function() {
-                if (map && (currentLayerType === 'hybrid' || currentLayerType === 'satellite') && !map.hasLayer(esriSatLayer)) {
-                    map.addLayer(esriSatLayer);
-                }
-            });
-            pureSatLayer.on('tileerror', function() {
-                if (map && currentLayerType === 'satellite' && !map.hasLayer(esriSatLayer)) {
-                    map.addLayer(esriSatLayer);
-                }
-            });
-
-            var startLayer = googleSatLayer;
-            if (currentLayerType === 'road') startLayer = googleRoadLayer;
-            else if (currentLayerType === 'satellite') startLayer = pureSatLayer;
-            else if (currentLayerType === 'terrain') startLayer = terrainLayer;
-            else startLayer = googleSatLayer; // default to hybrid satellite with street names!
+            initTileLayers();
 
             map = L.map('map', {
                 center: [lat, lng],
                 zoom: zoom,
                 zoomControl: false,
-                layers: [startLayer]
+                attributionControl: false
             });
 
-            if (isPicker) {
+            if (!map.getPane('labelsPane')) {
+                map.createPane('labelsPane');
+                map.getPane('labelsPane').style.zIndex = 650;
+                map.getPane('labelsPane').style.pointerEvents = 'none';
+            }
+
+            switchLayer(currentLayerType);
+
+            if (isPickerMode) {
                 map.on('move', function() {
                     var c = map.getCenter();
-                    if (window.AndroidBridge && window.AndroidBridge.onCenterMoved) {
-                        AndroidBridge.onCenterMoved(c.lat, c.lng);
-                    }
+                    notifyCenterMoved(c.lat, c.lng);
                 });
                 map.on('moveend', function() {
                     var c = map.getCenter();
-                    if (window.AndroidBridge && window.AndroidBridge.onCenterMoved) {
-                        AndroidBridge.onCenterMoved(c.lat, c.lng);
-                    }
+                    notifyCenterMoved(c.lat, c.lng);
                 });
             }
 
@@ -851,44 +904,23 @@ html, body {
             setTimeout(triggerResize, 100);
             setTimeout(triggerResize, 300);
             setTimeout(triggerResize, 800);
-            setInterval(triggerResize, 1500);
 
-            if (window.AndroidBridge && window.AndroidBridge.onMapLoaded) {
-                AndroidBridge.onMapLoaded();
-            }
+            notifyMapLoaded();
         }
 
-        function removeAllTileLayers() {
-            if (!map) return;
-            var all = [googleRoadLayer, cartoStreetLayer, osmStreetLayer, googleSatLayer, pureSatLayer, terrainLayer, esriSatLayer];
-            for (var i = 0; i < all.length; i++) {
-                if (all[i] && map.hasLayer(all[i])) {
-                    map.removeLayer(all[i]);
-                }
-            }
-        }
-
-        function switchLayer(type) {
-            currentLayerType = type;
-            if (!map) return;
-            removeAllTileLayers();
-            if (type === 'road') {
-                map.addLayer(googleRoadLayer);
-            } else if (type === 'satellite') {
-                map.addLayer(pureSatLayer);
-            } else if (type === 'terrain') {
-                map.addLayer(terrainLayer);
-            } else {
-                // 'hybrid'
-                map.addLayer(googleSatLayer);
-            }
-            setTimeout(function() { if (map) map.invalidateSize(true); }, 50);
+        // Backward compatibility aliases
+        function initMap(lat, lng, zoom, layerType) {
+            setupMap(lat, lng, zoom, false, layerType);
         }
 
         function setMapView(lat, lng, zoom) {
             if (!map) return;
             map.setView([lat, lng], zoom || map.getZoom());
             setTimeout(function() { if (map) map.invalidateSize(); }, 50);
+        }
+
+        function setCenter(lat, lng) {
+            setMapView(lat, lng, map ? map.getZoom() : 16);
         }
 
         function zoomIn() { if (map) map.zoomIn(); }
@@ -900,9 +932,11 @@ html, body {
                 map.removeLayer(currentMarkers[i]);
             }
             currentMarkers = [];
+            if (!markersJson) return;
 
             try {
                 var data = (typeof markersJson === 'string') ? JSON.parse(markersJson) : markersJson;
+                if (!Array.isArray(data)) return;
                 for (var j = 0; j < data.length; j++) {
                     var m = data[j];
                     var cls = m.status === 'DELIVERED' ? 'pin-delivered' : (m.status === 'COD' ? 'pin-cod' : 'pin-pending');
@@ -915,20 +949,24 @@ html, body {
                     var marker = L.marker([m.latitude, m.longitude], { icon: icon }).addTo(map);
                     marker.on('click', (function(id) {
                         return function() {
-                            if (window.AndroidBridge && window.AndroidBridge.onMarkerSelected) {
-                                AndroidBridge.onMarkerSelected(String(id));
-                            }
+                            notifyMarkerSelected(id);
                         };
                     })(m.id));
                     currentMarkers.push(marker);
                 }
             } catch (e) {
-                console.error("Error updating markers: " + e);
+                notifyMapError("Error updating markers: " + e);
             }
         }
 
+        function setMarkers(markersJson) {
+            updateMarkers(markersJson);
+        }
+
         window.onload = function() {
-            setupMap(18.7883, 98.9853, 16, true, 'street');
+            if (!map) {
+                setupMap(18.7883, 98.9853, 16, true, 'hybrid');
+            }
         };
     </script>
 </body>

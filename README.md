@@ -139,3 +139,20 @@ timeout 5m gradle -Dorg.gradle.jvmargs= --no-daemon --max-workers=2 --offline --
 - [x] **Phase J — Data Safety & Export**
   - [x] ส่งออกข้อมูลสำรอง (Export JSON Backup)
   - [x] ระบบ Audit Trail บันทึก Delivery Events
+
+## การตั้งค่าแผนที่และ Google Street View (Map & Street View Setup)
+
+Dropway ใช้สถาปัตยกรรมแผนที่แบบ Dual-Engine:
+1. **Native Google Maps SDK & Street View (Primary):**
+   - รองรับ 4 เลเยอร์: ไฮบริด (Hybrid), ถนน (Road), ดาวเทียม (Satellite), ภูมิประเทศ (Terrain)
+   - ภาพพาโนรามา 360 Google Street View ในตัวแอป พร้อมปุ่มหมุน ปรับทิศเหนือ ซูม และเดินสำรวจถนนจริง
+   - การใส่ API Key: ระบุในไฟล์ `local.properties` (ไม่ถูก track ใน git):
+     ```properties
+     DROPWAY_GOOGLE_MAPS_KEY=AIzaSyYourActualKeyHere
+     ```
+     หรือระบุผ่าน Environment Variable: `export DROPWAY_GOOGLE_MAPS_KEY=AIzaSy...`
+2. **Compliant OpenStreetMap & Esri Fallback (Secondary):**
+   - เมื่อไม่มี Google Maps API Key หรือใช้งานบนอุปกรณ์ที่ไม่มี Google Play Services แอปจะสลับมาใช้แผนที่ทางเลือกที่ถูกลิขสิทธิ์ 100% โดยอัตโนมัติ (OpenStreetMap สำหรับแผนที่ถนน, Esri World Imagery สำหรับแผนที่ดาวเทียมและไฮบริด, OpenTopoMap สำหรับภูมิประเทศ) พร้อมระบุ attribution ครบถ้วน
+   - สถาปัตยกรรม JavaScript Bridge (`AndroidBridge`) รองรับการโต้ตอบแบบ 2 ทาง (ย้ายหมุดกลางจอ, เลือกหมุดพัสดุตามสถานะ, อัปเดตพิกัด HUD แบบเรียลไทม์)
+   - ปฏิบัติตามนโยบาย Offline-first: หากไม่มีอินเทอร์เน็ต แอปจะแสดงแบนเนอร์แจ้งเตือนอย่างชัดเจน ขณะที่ระบบฐานข้อมูลพัสดุและรายการนำส่งทั้งหมดทำงานออฟไลน์ได้ 100%
+

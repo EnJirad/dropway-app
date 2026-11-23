@@ -1,4 +1,3 @@
 <resources>
     <string name="app_name">Dropway</string>
-    <string name="google_maps_key" translatable="false">YOUR_API_KEY_HERE</string>
 </resources>
