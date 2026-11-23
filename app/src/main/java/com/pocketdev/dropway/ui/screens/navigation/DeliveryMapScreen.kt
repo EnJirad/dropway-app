@@ -32,6 +32,7 @@ import com.pocketdev.dropway.core.util.PhoneUtils
 import com.pocketdev.dropway.ui.components.DeliveryStatusBadge
 import com.pocketdev.dropway.ui.components.DropwayMapView
 import com.pocketdev.dropway.ui.components.DropwayStreetViewDialog
+import com.pocketdev.dropway.ui.components.GoogleMapsHelper
 import com.pocketdev.dropway.ui.components.MapMarkerItem
 import com.pocketdev.dropway.ui.theme.*
 import kotlinx.coroutines.launch
@@ -228,7 +229,11 @@ fun DeliveryMapScreen(
                         },
                         onOpenStreetView = {
                             if (parcel.latitude != null && parcel.longitude != null) {
-                                streetViewParcel = parcel
+                                if (GoogleMapsHelper.isGoogleMapsSdkUsable(context)) {
+                                    streetViewParcel = parcel
+                                } else {
+                                    LocationUtils.openStreetView(context, parcel.latitude, parcel.longitude)
+                                }
                             }
                         },
                         onCall = {

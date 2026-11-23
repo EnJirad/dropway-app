@@ -92,6 +92,7 @@ fun DropwayStreetViewDialog(
 ) {
     val context = LocalContext.current
     val isOnline = remember { NetworkUtils.isNetworkAvailable(context) }
+    val isApiKeyUsable = remember { GoogleMapsHelper.isGoogleMapsSdkUsable(context) }
     var isLoading by remember { mutableStateOf(true) }
     var isCoverageAvailable by remember { mutableStateOf<Boolean?>(null) }
     var panoramaRef by remember { mutableStateOf<StreetViewPanorama?>(null) }
@@ -100,11 +101,13 @@ fun DropwayStreetViewDialog(
 
     // Fallback timeout in case no Street View imagery exists for this coordinate
     LaunchedEffect(currentRadius, latitude, longitude) {
-        isLoading = true
-        delay(10000L) // 10-second timeout detection
-        if (isLoading && isCoverageAvailable != true) {
-            isLoading = false
-            isCoverageAvailable = false
+        if (isApiKeyUsable) {
+            isLoading = true
+            delay(10000L) // 10-second timeout detection
+            if (isLoading && isCoverageAvailable != true) {
+                isLoading = false
+                isCoverageAvailable = false
+            }
         }
     }
 
@@ -120,7 +123,90 @@ fun DropwayStreetViewDialog(
             color = DropwayNavy
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
-                if (!isOnline) {
+                if (!isApiKeyUsable) {
+                    // Zero-API Free Fallback Card
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xE60F172A)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(20.dp),
+                            color = Color.White,
+                            shadowElevation = 10.dp,
+                            modifier = Modifier
+                                .fillMaxWidth(0.9f)
+                                .padding(16.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(22.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(54.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFE0F2FE)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_street_view),
+                                        contentDescription = null,
+                                        tint = DropwayPrimary,
+                                        modifier = Modifier.size(30.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(14.dp))
+                                Text(
+                                    text = "โหมดฟรี (Zero-API Mode)",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 17.sp,
+                                    color = TextPrimary,
+                                    textAlign = TextAlign.Center
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "โหมดนี้ไม่ต้องใช้ API Key และไม่มีค่าบริการใดๆ สามารถเปิดดูภาพถนนจริง 360° แบบคมชัดและหมุนรอบทิศทางผ่านแอป Google Maps ในเครื่องได้ฟรีทันที",
+                                    fontSize = 13.sp,
+                                    color = TextSecondary,
+                                    textAlign = TextAlign.Center,
+                                    lineHeight = 18.sp
+                                )
+
+                                Spacer(modifier = Modifier.height(20.dp))
+                                Button(
+                                    onClick = {
+                                        LocationUtils.openStreetView(context, latitude, longitude)
+                                        onDismiss()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = DropwayNavy),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_street_view),
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("เปิดใน Google Maps แอป (ฟรี)", fontWeight = FontWeight.Bold)
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = onDismiss,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(10.dp)
+                                ) {
+                                    Text("กลับสู่แผนที่", fontWeight = FontWeight.Bold, color = TextPrimary)
+                                }
+                            }
+                        }
+                    }
+                } else if (!isOnline) {
                     // Offline Fallback Card
                     Box(
                         modifier = Modifier

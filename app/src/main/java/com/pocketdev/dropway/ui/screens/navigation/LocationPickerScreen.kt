@@ -29,6 +29,7 @@ import com.pocketdev.dropway.core.util.LocationUtils
 import com.pocketdev.dropway.ui.components.DropwayMapView
 import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
 import com.pocketdev.dropway.ui.components.DropwayStreetViewDialog
+import com.pocketdev.dropway.ui.components.GoogleMapsHelper
 import com.pocketdev.dropway.ui.theme.*
 import java.util.Locale
 
@@ -233,7 +234,13 @@ fun LocationPickerScreen(
                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { showStreetViewDialog = true }
+                        .clickable {
+                            if (GoogleMapsHelper.isGoogleMapsSdkUsable(context)) {
+                                showStreetViewDialog = true
+                            } else {
+                                LocationUtils.openStreetView(context, centerLat, centerLng)
+                            }
+                        }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),

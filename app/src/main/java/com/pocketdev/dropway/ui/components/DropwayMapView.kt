@@ -654,13 +654,17 @@ fun DropwayMapView(
                 }
             )
 
-            // Real Google Street View 360° Panorama Launcher
+            // Real Google Street View 360° Panorama Launcher (Zero-API: Launches native Google Maps app directly)
             FloatingRoundButton(
                 iconRes = R.drawable.ic_street_view,
                 contentDescription = "ดูภาพถนนจริง Street View",
                 tint = DropwayPrimaryDark,
                 onClick = {
-                    showStreetViewDialog = true
+                    if (useGoogleMaps) {
+                        showStreetViewDialog = true
+                    } else {
+                        LocationUtils.openStreetView(context, currentLat, currentLng)
+                    }
                 }
             )
         }

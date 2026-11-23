@@ -28,6 +28,7 @@ import com.pocketdev.dropway.core.util.LocationUtils
 import com.pocketdev.dropway.core.util.PhoneUtils
 import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
 import com.pocketdev.dropway.ui.components.DropwayStreetViewDialog
+import com.pocketdev.dropway.ui.components.GoogleMapsHelper
 import com.pocketdev.dropway.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -195,7 +196,11 @@ fun HouseholdDetailScreen(
                             Spacer(modifier = Modifier.height(8.dp))
                             OutlinedButton(
                                 onClick = {
-                                    showStreetViewDialog = true
+                                    if (GoogleMapsHelper.isGoogleMapsSdkUsable(context)) {
+                                        showStreetViewDialog = true
+                                    } else {
+                                        LocationUtils.openStreetView(context, h.latitude, h.longitude)
+                                    }
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(10.dp)
