@@ -11,6 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -31,9 +32,9 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -54,6 +55,11 @@ import com.pocketdev.dropway.ui.components.map.CachedTileBitmap
 import com.pocketdev.dropway.ui.components.map.MapTileLoader
 import com.pocketdev.dropway.ui.components.map.MapTileMath
 import com.pocketdev.dropway.ui.theme.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.*
 
@@ -61,7 +67,6 @@ import kotlin.math.*
  * Standard 2D map providers in Dropway:
  * 1. OpenStreetMap (Standard road map, streets, labels, place details, keyless)
  * 2. Satellite (Real aerial satellite imagery via Esri World Imagery, keyless)
- * 3. Carto Voyager (Clean modern street map tiles, keyless)
  */
 enum class DropwayMapType(
     val label: String,
@@ -83,20 +88,12 @@ enum class DropwayMapType(
         iconRes = R.drawable.ic_satellite,
         attribution = "© Esri, Maxar, Earthstar Geographics",
         maxNativeZoom = 18 // Esri guaranteed universal high-res imagery coverage level
-    ),
-    CARTO_VOYAGER(
-        label = "Carto",
-        layerKey = "carto",
-        iconRes = R.drawable.ic_layers,
-        attribution = "© CARTO © OpenStreetMap contributors",
-        maxNativeZoom = 19
     );
 
     fun getTileUrl(x: Int, y: Int, z: Int): String {
         return when (this) {
             OPEN_STREET_MAP -> "https://tile.openstreetmap.org/$z/$x/$y.png"
             SATELLITE -> "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/$z/$y/$x"
-            CARTO_VOYAGER -> "https://a.basemaps.cartocdn.com/rastertiles/voyager/$z/$x/$y.png"
         }
     }
 }
@@ -211,6 +208,7 @@ fun DropwayMapView(
     onMarkerClick: ((Long) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val isOnline = remember { NetworkUtils.isNetworkAvailable(context) }
 
     var currentMapType by remember { mutableStateOf(DropwayMapType.OPEN_STREET_MAP) }
@@ -218,6 +216,7 @@ fun DropwayMapView(
     var currentLng by remember { mutableStateOf(initialLng) }
     var zoom by remember { mutableStateOf(initialZoom.toDouble()) }
     var isDragging by remember { mutableStateOf(false) }
+    var flingJob by remember { mutableStateOf<Job?>(null) }
 
     var showStreetViewDialog by remember { mutableStateOf(false) }
 
@@ -249,61 +248,166 @@ fun DropwayMapView(
                 .fillMaxSize()
                 .clipToBounds()
         ) {
-            val density = LocalDensity.current.density
             val wPx = constraints.maxWidth.toFloat()
             val hPx = constraints.maxHeight.toFloat()
             val halfW = wPx / 2f
             val halfH = hPx / 2f
 
-            // Multi-touch gestures: Drag pan + Pinch zoom + Double tap zoom
-            // Recovered from original smooth implementation in 01b841b
+            // Multi-touch gestures: Immediate 0-delay pan + Continuous pinch zoom + Momentum fling + Smooth double-tap zoom
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(Unit) {
-                        detectTapGestures(
-                            onDoubleTap = {
-                                zoom = (zoom + 1.0).coerceAtMost(MapTileMath.MAX_ZOOM)
-                                onCoordinatesChangedState.value?.invoke(currentLat, currentLng)
-                            }
-                        )
-                    }
-                    .pointerInput(Unit) {
-                        detectTransformGestures { _, pan, zoomFactor, _ ->
-                            if (zoomFactor != 1f) {
-                                val zoomChange = ln(zoomFactor.toDouble()) / ln(2.0)
-                                zoom = (zoom + zoomChange).coerceIn(MapTileMath.MIN_ZOOM, MapTileMath.MAX_ZOOM)
-                            }
-                            if (pan.x != 0f || pan.y != 0f) {
+                        awaitPointerEventScope {
+                            val velocityTracker = VelocityTracker()
+                            var lastTapTime = 0L
+
+                            while (true) {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                flingJob?.cancel()
                                 isDragging = true
-                                val n = 2.0.pow(zoom)
-                                val worldTotalPx = n * MapTileMath.TILE_SIZE
-                                val currWorldX = ((currentLng + 180.0) / 360.0) * worldTotalPx
-                                val latClamped = currentLat.coerceIn(-85.05112878, 85.05112878)
-                                val latRad = Math.toRadians(latClamped)
-                                val currWorldY = ((1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / Math.PI) / 2.0) * worldTotalPx
+                                velocityTracker.resetTracking()
+                                velocityTracker.addPosition(down.uptimeMillis, down.position)
 
-                                val newWorldX = currWorldX - pan.x.toDouble()
-                                val newWorldY = currWorldY - pan.y.toDouble()
+                                var isMultiTouch = false
+                                var prevDistance = 0f
+                                var prevMidpoint = Offset.Zero
+                                var lastNotifyTime = System.currentTimeMillis()
 
-                                val newLng = ((newWorldX / worldTotalPx) * 360.0 - 180.0).coerceIn(-180.0, 180.0)
-                                val mercY = 0.5 - (newWorldY / worldTotalPx)
-                                val newLat = Math.toDegrees(atan(sinh(mercY * 2.0 * Math.PI))).coerceIn(-85.05112878, 85.05112878)
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val activePointers = event.changes.filter { it.pressed }
+                                    if (activePointers.isEmpty()) {
+                                        // All touches released
+                                        isDragging = false
+                                        val now = System.currentTimeMillis()
+                                        val isQuickTap = (now - down.uptimeMillis) < 250L
 
-                                currentLat = newLat
-                                currentLng = newLng
-                                onCoordinatesChangedState.value?.invoke(newLat, newLng)
+                                        if (!isMultiTouch && isQuickTap && (now - lastTapTime) < 320L) {
+                                            // Double tap: smooth 180ms animated zoom
+                                            lastTapTime = 0L
+                                            flingJob?.cancel()
+                                            flingJob = scope.launch {
+                                                val startZoom = zoom
+                                                val targetZoom = (startZoom + 1.0).coerceAtMost(MapTileMath.MAX_ZOOM)
+                                                val diff = targetZoom - startZoom
+                                                val startTime = withFrameNanos { it }
+                                                while (true) {
+                                                    val frameTime = withFrameNanos { it }
+                                                    val p = ((frameTime - startTime) / 180_000_000f).coerceIn(0f, 1f)
+                                                    val eased = 1f - (1f - p) * (1f - p)
+                                                    zoom = startZoom + diff * eased
+                                                    if (p >= 1f) break
+                                                }
+                                                onCoordinatesChangedState.value?.invoke(currentLat, currentLng)
+                                            }
+                                        } else {
+                                            if (isQuickTap) {
+                                                lastTapTime = now
+                                            } else {
+                                                lastTapTime = 0L
+                                            }
+
+                                            // Fling momentum glide for natural, fluid panning
+                                            if (!isMultiTouch) {
+                                                val velocity = velocityTracker.calculateVelocity()
+                                                val speedSq = velocity.x * velocity.x + velocity.y * velocity.y
+                                                if (speedSq > 40_000f) { // > 200 px/sec
+                                                    flingJob?.cancel()
+                                                    flingJob = scope.launch {
+                                                        var vx = velocity.x.coerceIn(-5000f, 5000f)
+                                                        var vy = velocity.y.coerceIn(-5000f, 5000f)
+                                                        var lastTime = withFrameNanos { it }
+                                                        while (abs(vx) > 35f || abs(vy) > 35f) {
+                                                            val frameTime = withFrameNanos { it }
+                                                            val dt = ((frameTime - lastTime) / 1_000_000_000f).coerceIn(0.001f, 0.05f)
+                                                            lastTime = frameTime
+                                                            val panX = vx * dt
+                                                            val panY = vy * dt
+                                                            val (nLat, nLng) = applyPan(panX, panY, zoom, currentLat, currentLng)
+                                                            currentLat = nLat
+                                                            currentLng = nLng
+                                                            val decay = 0.92f.pow(dt * 60f)
+                                                            vx *= decay
+                                                            vy *= decay
+                                                        }
+                                                        onCoordinatesChangedState.value?.invoke(currentLat, currentLng)
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        onCoordinatesChangedState.value?.invoke(currentLat, currentLng)
+                                        break
+                                    }
+
+                                    if (activePointers.size == 1) {
+                                        if (!isMultiTouch) {
+                                            val change = activePointers[0]
+                                            velocityTracker.addPosition(change.uptimeMillis, change.position)
+                                            val pan = change.position - change.previousPosition
+                                            if (pan.x != 0f || pan.y != 0f) {
+                                                change.consume()
+                                                val (nLat, nLng) = applyPan(pan.x, pan.y, zoom, currentLat, currentLng)
+                                                currentLat = nLat
+                                                currentLng = nLng
+
+                                                val now = System.currentTimeMillis()
+                                                if (now - lastNotifyTime >= 50L) {
+                                                    lastNotifyTime = now
+                                                    onCoordinatesChangedState.value?.invoke(nLat, nLng)
+                                                }
+                                            }
+                                        }
+                                    } else if (activePointers.size >= 2) {
+                                        isMultiTouch = true
+                                        flingJob?.cancel()
+                                        val p1 = activePointers[0].position
+                                        val p2 = activePointers[1].position
+                                        val currentDist = (p1 - p2).getDistance()
+                                        val currentMidpoint = (p1 + p2) / 2f
+
+                                        if (prevDistance > 0f && currentDist > 0f) {
+                                            val zoomFactor = currentDist / prevDistance
+                                            if (zoomFactor > 0f && zoomFactor != 1f) {
+                                                val zoomChange = ln(zoomFactor.toDouble()) / ln(2.0)
+                                                zoom = (zoom + zoomChange).coerceIn(MapTileMath.MIN_ZOOM, MapTileMath.MAX_ZOOM)
+                                            }
+
+                                            val pan = currentMidpoint - prevMidpoint
+                                            if (pan.x != 0f || pan.y != 0f) {
+                                                val (nLat, nLng) = applyPan(pan.x, pan.y, zoom, currentLat, currentLng)
+                                                currentLat = nLat
+                                                currentLng = nLng
+                                            }
+
+                                            val now = System.currentTimeMillis()
+                                            if (now - lastNotifyTime >= 50L) {
+                                                lastNotifyTime = now
+                                                onCoordinatesChangedState.value?.invoke(currentLat, currentLng)
+                                            }
+                                        }
+
+                                        prevDistance = currentDist
+                                        prevMidpoint = currentMidpoint
+                                        for (p in activePointers) {
+                                            p.consume()
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
             ) {
-                // Layer 1: Stylized vector backdrop canvas (smooth background while tiles load)
-                MapBackdropCanvas(
-                    isSatellite = (currentMapType == DropwayMapType.SATELLITE),
-                    modifier = Modifier.fillMaxSize()
-                )
+                // Layer 1 & 2: Hardware-accelerated Skia Canvas rendering raster tiles and vector grid
+                val tilePaint = remember {
+                    android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG).apply {
+                        isAntiAlias = true
+                        isFilterBitmap = true
+                    }
+                }
+                var tileCacheVersion by remember { mutableStateOf(0) }
 
-                // Layer 2: Native Slippy Raster Map Tiles with Adaptive Deep Zoom
                 val sourceTileZoom = min(zoom.toInt(), currentMapType.maxNativeZoom).coerceIn(MapTileMath.MIN_ZOOM.toInt(), currentMapType.maxNativeZoom)
                 val overzoomFactor = 2.0.pow(zoom - sourceTileZoom)
                 val scale = overzoomFactor.toFloat()
@@ -317,22 +421,69 @@ fun DropwayMapView(
                 val minTileY = floor((centerMercY - halfH / scale) / MapTileMath.TILE_SIZE).toInt().coerceIn(0, numTiles - 1)
                 val maxTileY = ceil((centerMercY + halfH / scale) / MapTileMath.TILE_SIZE).toInt().coerceIn(0, numTiles - 1)
 
-                for (tx in minTileX..maxTileX) {
-                    for (ty in minTileY..maxTileY) {
-                        val wrappedTx = ((tx % numTiles) + numTiles) % numTiles
-                        val tileScreenX = halfW + ((tx * MapTileMath.TILE_SIZE - centerMercX) * scale).toFloat()
-                        val tileScreenY = halfH + ((ty * MapTileMath.TILE_SIZE - centerMercY) * scale).toFloat()
+                val activeMapType = currentMapType
+                LaunchedEffect(sourceTileZoom, minTileX, maxTileX, minTileY, maxTileY, activeMapType) {
+                    for (tx in minTileX..maxTileX) {
+                        for (ty in minTileY..maxTileY) {
+                            val wrappedTx = ((tx % numTiles) + numTiles) % numTiles
+                            val exactUrl = activeMapType.getTileUrl(wrappedTx, ty, sourceTileZoom)
+                            if (MapTileLoader.getMemoryBitmap(exactUrl) == null) {
+                                launch(Dispatchers.IO) {
+                                    val loaded = MapTileLoader.loadTileWithFallback(context, wrappedTx, ty, sourceTileZoom) { x, y, z ->
+                                        activeMapType.getTileUrl(x, y, z)
+                                    }
+                                    if (loaded != null) {
+                                        tileCacheVersion++
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
-                        key("$sourceTileZoom-$wrappedTx-$ty-$currentMapType") {
-                            NativeTileItem(
-                                mapType = currentMapType,
-                                x = wrappedTx,
-                                y = ty,
-                                z = sourceTileZoom,
-                                modifier = Modifier
-                                    .offset { IntOffset(tileScreenX.roundToInt(), tileScreenY.roundToInt()) }
-                                    .size((scaledTilePx / density).dp)
-                            )
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    // Vector grid backdrop
+                    val isSatellite = (activeMapType == DropwayMapType.SATELLITE)
+                    val bgColor = if (isSatellite) Color(0xFF0F172A) else Color(0xFFE2E8F0)
+                    val gridColor = if (isSatellite) Color(0xFF1E293B).copy(alpha = 0.6f) else Color(0xFFCBD5E1).copy(alpha = 0.6f)
+                    drawRect(color = bgColor)
+                    val step = 32.dp.toPx()
+                    var gx = 0f
+                    while (gx < size.width) {
+                        drawLine(color = gridColor, start = Offset(gx, 0f), end = Offset(gx, size.height), strokeWidth = 1f)
+                        gx += step
+                    }
+                    var gy = 0f
+                    while (gy < size.height) {
+                        drawLine(color = gridColor, start = Offset(0f, gy), end = Offset(size.width, gy), strokeWidth = 1f)
+                        gy += step
+                    }
+
+                    // Native Raster Tiles with Quadtree fallback and bilinear filtering
+                    tileCacheVersion.let { /* Observe tile loader state updates */ }
+                    drawIntoCanvas { canvas ->
+                        val nativeCanvas = canvas.nativeCanvas
+                        val dstRect = android.graphics.Rect()
+
+                        for (tx in minTileX..maxTileX) {
+                            for (ty in minTileY..maxTileY) {
+                                val wrappedTx = ((tx % numTiles) + numTiles) % numTiles
+                                val cached = MapTileLoader.getMemoryBitmapOrParent(wrappedTx, ty, sourceTileZoom) { x, y, z ->
+                                    activeMapType.getTileUrl(x, y, z)
+                                }
+
+                                if (cached != null) {
+                                    val screenX = halfW + ((tx * MapTileMath.TILE_SIZE - centerMercX) * scale).toFloat()
+                                    val screenY = halfH + ((ty * MapTileMath.TILE_SIZE - centerMercY) * scale).toFloat()
+                                    dstRect.set(
+                                        screenX.roundToInt(),
+                                        screenY.roundToInt(),
+                                        (screenX + scaledTilePx).roundToInt(),
+                                        (screenY + scaledTilePx).roundToInt()
+                                    )
+                                    nativeCanvas.drawBitmap(cached.bitmap, cached.srcRect, dstRect, tilePaint)
+                                }
+                            }
                         }
                     }
                 }
@@ -438,7 +589,7 @@ fun DropwayMapView(
                     .padding(top = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Segmented Switcher [ OpenStreetMap | ดาวเทียม | Carto ]
+                // Segmented Switcher [ OpenStreetMap | ดาวเทียม ]
                 Surface(
                     shape = RoundedCornerShape(30.dp),
                     color = Color.White,
@@ -575,23 +726,53 @@ fun DropwayMapView(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalAlignment = Alignment.End
             ) {
-                // Zoom In
+                // Zoom In (Smooth animated 180ms ease-out)
                 FloatingRoundButton(
                     iconRes = R.drawable.ic_add,
                     contentDescription = "ซูมเข้า",
                     onClick = {
-                        zoom = (zoom + 1.0).coerceAtMost(MapTileMath.MAX_ZOOM)
-                        onCoordinatesChanged?.invoke(currentLat, currentLng)
+                        flingJob?.cancel()
+                        val startZoom = zoom
+                        val targetZoom = (startZoom + 1.0).coerceAtMost(MapTileMath.MAX_ZOOM)
+                        val diff = targetZoom - startZoom
+                        if (diff > 0.001) {
+                            flingJob = scope.launch {
+                                val startTime = withFrameNanos { it }
+                                while (true) {
+                                    val now = withFrameNanos { it }
+                                    val p = ((now - startTime) / 180_000_000f).coerceIn(0f, 1f)
+                                    val eased = 1f - (1f - p) * (1f - p)
+                                    zoom = startZoom + diff * eased
+                                    if (p >= 1f) break
+                                }
+                                onCoordinatesChangedState.value?.invoke(currentLat, currentLng)
+                            }
+                        }
                     }
                 )
 
-                // Zoom Out
+                // Zoom Out (Smooth animated 180ms ease-out)
                 FloatingRoundButton(
                     iconRes = R.drawable.ic_minus,
                     contentDescription = "ซูมออก",
                     onClick = {
-                        zoom = (zoom - 1.0).coerceAtLeast(MapTileMath.MIN_ZOOM)
-                        onCoordinatesChanged?.invoke(currentLat, currentLng)
+                        flingJob?.cancel()
+                        val startZoom = zoom
+                        val targetZoom = (startZoom - 1.0).coerceAtLeast(MapTileMath.MIN_ZOOM)
+                        val diff = targetZoom - startZoom
+                        if (diff < -0.001) {
+                            flingJob = scope.launch {
+                                val startTime = withFrameNanos { it }
+                                while (true) {
+                                    val now = withFrameNanos { it }
+                                    val p = ((now - startTime) / 180_000_000f).coerceIn(0f, 1f)
+                                    val eased = 1f - (1f - p) * (1f - p)
+                                    zoom = startZoom + diff * eased
+                                    if (p >= 1f) break
+                                }
+                                onCoordinatesChangedState.value?.invoke(currentLat, currentLng)
+                            }
+                        }
                     }
                 )
 
@@ -600,11 +781,12 @@ fun DropwayMapView(
                     iconRes = R.drawable.ic_my_location,
                     contentDescription = "ตำแหน่งเริ่มต้น",
                     onClick = {
+                        flingJob?.cancel()
                         currentLat = initialLat
                         currentLng = initialLng
                         zoom = MapTileMath.DEFAULT_ZOOM
                         if (isPickerMode) {
-                            onCoordinatesChanged?.invoke(initialLat, initialLng)
+                            onCoordinatesChangedState.value?.invoke(initialLat, initialLng)
                         }
                     }
                 )
@@ -790,88 +972,29 @@ private fun MicroPinMarker(
 }
 
 /**
- * Individual native raster tile composable with multi-level Quadtree progressive replacement.
- * Synchronously checks in-memory LruCache to eliminate any draw delay,
- * and asynchronously loads from disk cache or network via MapTileLoader on Dispatchers.IO.
+ * High-performance Web Mercator pan computation.
+ * Converts screen pixel delta directly to geographical coordinates.
  */
-@Composable
-private fun NativeTileItem(
-    mapType: DropwayMapType,
-    x: Int,
-    y: Int,
-    z: Int,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    val tileUrl = remember(mapType, x, y, z) { mapType.getTileUrl(x, y, z) }
+private fun applyPan(
+    panX: Float,
+    panY: Float,
+    curZoom: Double,
+    curLat: Double,
+    curLng: Double
+): Pair<Double, Double> {
+    val worldTotalPx = 2.0.pow(curZoom) * MapTileMath.TILE_SIZE
+    val currWorldX = ((curLng + 180.0) / 360.0) * worldTotalPx
+    val latClamped = curLat.coerceIn(-85.05112878, 85.05112878)
+    val latRad = Math.toRadians(latClamped)
+    val currWorldY = ((1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / Math.PI) / 2.0) * worldTotalPx
 
-    var cachedItem by remember(tileUrl) {
-        mutableStateOf(
-            MapTileLoader.getMemoryBitmapOrParent(x, y, z) { tx, ty, tz ->
-                mapType.getTileUrl(tx, ty, tz)
-            }
-        )
-    }
+    val newWorldX = currWorldX - panX.toDouble()
+    val newWorldY = currWorldY - panY.toDouble()
 
-    LaunchedEffect(tileUrl) {
-        if (cachedItem?.srcRect != null || cachedItem == null) {
-            val loaded = MapTileLoader.loadTileWithFallback(context, x, y, z) { tx, ty, tz ->
-                mapType.getTileUrl(tx, ty, tz)
-            }
-            if (loaded != null) {
-                cachedItem = loaded
-            }
-        }
-    }
-
-    val item = cachedItem
-    if (item != null) {
-        val src = item.srcRect
-        if (src == null) {
-            Image(
-                bitmap = item.bitmap.asImageBitmap(),
-                contentDescription = null,
-                contentScale = ContentScale.FillBounds,
-                modifier = modifier
-            )
-        } else {
-            Canvas(modifier = modifier) {
-                drawIntoCanvas { canvas ->
-                    val dst = Rect(0, 0, size.width.toInt(), size.height.toInt())
-                    canvas.nativeCanvas.drawBitmap(item.bitmap, src, dst, null)
-                }
-            }
-        }
-    }
-}
-
-/**
- * Vector grid backdrop canvas, based on Velnox MapBackdropCanvas.
- * Ensures a clean, pleasant grid appears while tiles are loading or when offline,
- * rather than a jarring black or empty canvas.
- */
-@Composable
-private fun MapBackdropCanvas(
-    isSatellite: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val bgColor = if (isSatellite) Color(0xFF0F172A) else Color(0xFFE2E8F0)
-    val gridColor = if (isSatellite) Color(0xFF1E293B).copy(alpha = 0.6f) else Color(0xFFCBD5E1).copy(alpha = 0.6f)
-
-    Canvas(modifier = modifier) {
-        drawRect(color = bgColor)
-        val step = 32.dp.toPx()
-        var x = 0f
-        while (x < size.width) {
-            drawLine(color = gridColor, start = Offset(x, 0f), end = Offset(x, size.height), strokeWidth = 1f)
-            x += step
-        }
-        var y = 0f
-        while (y < size.height) {
-            drawLine(color = gridColor, start = Offset(0f, y), end = Offset(size.width, y), strokeWidth = 1f)
-            y += step
-        }
-    }
+    val newLng = ((newWorldX / worldTotalPx) * 360.0 - 180.0).coerceIn(-180.0, 180.0)
+    val mercY = 0.5 - (newWorldY / worldTotalPx)
+    val newLat = Math.toDegrees(atan(sinh(mercY * 2.0 * Math.PI))).coerceIn(-85.05112878, 85.05112878)
+    return Pair(newLat, newLng)
 }
 
 @Composable
