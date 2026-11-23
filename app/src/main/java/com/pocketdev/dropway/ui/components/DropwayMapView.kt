@@ -229,11 +229,7 @@ fun DropwayMapView(
         }
     }
 
-    // Stable state references for gestures so pointerInput coroutines are never cancelled mid-drag
-    val currentLatState = rememberUpdatedState(currentLat)
-    val currentLngState = rememberUpdatedState(currentLng)
-    val zoomState = rememberUpdatedState(zoom)
-    val isPickerModeState = rememberUpdatedState(isPickerMode)
+    // Stable reference for coordinate callback so pointerInput coroutines never cancel or drop listeners
     val onCoordinatesChangedState = rememberUpdatedState(onCoordinatesChanged)
 
     val pinLift by animateDpAsState(
@@ -260,118 +256,43 @@ fun DropwayMapView(
             val halfH = hPx / 2f
 
             // Multi-touch gestures: Drag pan + Pinch zoom + Double tap zoom
-            // Using stable key Unit ensures gesture detectors NEVER restart during active movement
+            // Recovered from original smooth implementation in 01b841b
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .pointerInput(Unit) {
                         detectTapGestures(
-                            onDoubleTap = { tapOffset ->
-                                val oldZoom = zoomState.value
-                                val newZoom = (oldZoom + 1.0).coerceAtMost(MapTileMath.MAX_ZOOM)
-                                if (newZoom != oldZoom) {
-                                    val isPicker = isPickerModeState.value
-                                    val fx = if (isPicker) halfW else tapOffset.x
-                                    val fy = if (isPicker) halfH else tapOffset.y
-
-                                    val oldTotalPx = 2.0.pow(oldZoom) * MapTileMath.TILE_SIZE
-                                    val currWorldX = ((currentLngState.value + 180.0) / 360.0) * oldTotalPx
-                                    val latClamped = currentLatState.value.coerceIn(-85.05112878, 85.05112878)
-                                    val latRad = Math.toRadians(latClamped)
-                                    val currWorldY = ((1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / Math.PI) / 2.0) * oldTotalPx
-
-                                    val focusWorldX = currWorldX + (fx.toDouble() - halfW.toDouble())
-                                    val focusWorldY = currWorldY + (fy.toDouble() - halfH.toDouble())
-
-                                    val focusLng = (focusWorldX / oldTotalPx) * 360.0 - 180.0
-                                    val mercYFocus = 0.5 - (focusWorldY / oldTotalPx)
-                                    val focusLat = Math.toDegrees(atan(sinh(mercYFocus * 2.0 * Math.PI))).coerceIn(-85.05112878, 85.05112878)
-
-                                    val newTotalPx = 2.0.pow(newZoom) * MapTileMath.TILE_SIZE
-                                    val newFocusWorldX = ((focusLng + 180.0) / 360.0) * newTotalPx
-                                    val focusLatRad = Math.toRadians(focusLat)
-                                    val newFocusWorldY = ((1.0 - ln(tan(focusLatRad) + 1.0 / cos(focusLatRad)) / Math.PI) / 2.0) * newTotalPx
-
-                                    val newCenterWorldX = newFocusWorldX - (fx.toDouble() - halfW.toDouble())
-                                    val newCenterWorldY = newFocusWorldY - (fy.toDouble() - halfH.toDouble())
-
-                                    val newLng = ((newCenterWorldX / newTotalPx) * 360.0 - 180.0).coerceIn(-180.0, 180.0)
-                                    val mercYCenter = 0.5 - (newCenterWorldY / newTotalPx)
-                                    val newLat = Math.toDegrees(atan(sinh(mercYCenter * 2.0 * Math.PI))).coerceIn(-85.05112878, 85.05112878)
-
-                                    zoom = newZoom
-                                    currentLat = newLat
-                                    currentLng = newLng
-                                    onCoordinatesChangedState.value?.invoke(newLat, newLng)
-                                }
+                            onDoubleTap = {
+                                zoom = (zoom + 1.0).coerceAtMost(MapTileMath.MAX_ZOOM)
+                                onCoordinatesChangedState.value?.invoke(currentLat, currentLng)
                             }
                         )
                     }
                     .pointerInput(Unit) {
-                        detectTransformGestures { centroid, pan, zoomFactor, _ ->
-                            if (zoomFactor != 1f || pan.x != 0f || pan.y != 0f) {
+                        detectTransformGestures { _, pan, zoomFactor, _ ->
+                            if (zoomFactor != 1f) {
+                                val zoomChange = ln(zoomFactor.toDouble()) / ln(2.0)
+                                zoom = (zoom + zoomChange).coerceIn(MapTileMath.MIN_ZOOM, MapTileMath.MAX_ZOOM)
+                            }
+                            if (pan.x != 0f || pan.y != 0f) {
                                 isDragging = true
-                                val oldZoom = zoomState.value
-                                val curLat = currentLatState.value
-                                val curLng = currentLngState.value
-                                val isPicker = isPickerModeState.value
+                                val n = 2.0.pow(zoom)
+                                val worldTotalPx = n * MapTileMath.TILE_SIZE
+                                val currWorldX = ((currentLng + 180.0) / 360.0) * worldTotalPx
+                                val latClamped = currentLat.coerceIn(-85.05112878, 85.05112878)
+                                val latRad = Math.toRadians(latClamped)
+                                val currWorldY = ((1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / Math.PI) / 2.0) * worldTotalPx
 
-                                if (zoomFactor == 1f) {
-                                    // High-speed direct Mercator pan path: immediate 1:1 finger tracking with 0 drag resistance
-                                    val worldTotalPx = 2.0.pow(oldZoom) * MapTileMath.TILE_SIZE
-                                    val currWorldX = ((curLng + 180.0) / 360.0) * worldTotalPx
-                                    val latClamped = curLat.coerceIn(-85.05112878, 85.05112878)
-                                    val latRad = Math.toRadians(latClamped)
-                                    val currWorldY = ((1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / Math.PI) / 2.0) * worldTotalPx
+                                val newWorldX = currWorldX - pan.x.toDouble()
+                                val newWorldY = currWorldY - pan.y.toDouble()
 
-                                    val newWorldX = currWorldX - pan.x.toDouble()
-                                    val newWorldY = currWorldY - pan.y.toDouble()
+                                val newLng = ((newWorldX / worldTotalPx) * 360.0 - 180.0).coerceIn(-180.0, 180.0)
+                                val mercY = 0.5 - (newWorldY / worldTotalPx)
+                                val newLat = Math.toDegrees(atan(sinh(mercY * 2.0 * Math.PI))).coerceIn(-85.05112878, 85.05112878)
 
-                                    val newLng = ((newWorldX / worldTotalPx) * 360.0 - 180.0).coerceIn(-180.0, 180.0)
-                                    val mercY = 0.5 - (newWorldY / worldTotalPx)
-                                    val newLat = Math.toDegrees(atan(sinh(mercY * 2.0 * Math.PI))).coerceIn(-85.05112878, 85.05112878)
-
-                                    currentLat = newLat
-                                    currentLng = newLng
-                                    onCoordinatesChangedState.value?.invoke(newLat, newLng)
-                                } else {
-                                    // Fluid continuous pinch zoom path with focal point stability
-                                    val zoomChange = ln(zoomFactor.toDouble()) / ln(2.0)
-                                    val newZoom = (oldZoom + zoomChange).coerceIn(MapTileMath.MIN_ZOOM, MapTileMath.MAX_ZOOM)
-
-                                    val fx = if (isPicker) halfW else centroid.x
-                                    val fy = if (isPicker) halfH else centroid.y
-
-                                    val oldTotalPx = 2.0.pow(oldZoom) * MapTileMath.TILE_SIZE
-                                    val currWorldX = ((curLng + 180.0) / 360.0) * oldTotalPx
-                                    val latClamped = curLat.coerceIn(-85.05112878, 85.05112878)
-                                    val latRad = Math.toRadians(latClamped)
-                                    val currWorldY = ((1.0 - ln(tan(latRad) + 1.0 / cos(latRad)) / Math.PI) / 2.0) * oldTotalPx
-
-                                    val focusWorldX = currWorldX + (fx.toDouble() - halfW.toDouble())
-                                    val focusWorldY = currWorldY + (fy.toDouble() - halfH.toDouble())
-
-                                    val focusLng = (focusWorldX / oldTotalPx) * 360.0 - 180.0
-                                    val mercYFocus = 0.5 - (focusWorldY / oldTotalPx)
-                                    val focusLat = Math.toDegrees(atan(sinh(mercYFocus * 2.0 * Math.PI))).coerceIn(-85.05112878, 85.05112878)
-
-                                    val newTotalPx = 2.0.pow(newZoom) * MapTileMath.TILE_SIZE
-                                    val newFocusWorldX = ((focusLng + 180.0) / 360.0) * newTotalPx
-                                    val focusLatRad = Math.toRadians(focusLat)
-                                    val newFocusWorldY = ((1.0 - ln(tan(focusLatRad) + 1.0 / cos(focusLatRad)) / Math.PI) / 2.0) * newTotalPx
-
-                                    val newCenterWorldX = newFocusWorldX - (fx.toDouble() - halfW.toDouble()) - pan.x.toDouble()
-                                    val newCenterWorldY = newFocusWorldY - (fy.toDouble() - halfH.toDouble()) - pan.y.toDouble()
-
-                                    val newLng = ((newCenterWorldX / newTotalPx) * 360.0 - 180.0).coerceIn(-180.0, 180.0)
-                                    val mercYCenter = 0.5 - (newCenterWorldY / newTotalPx)
-                                    val newLat = Math.toDegrees(atan(sinh(mercYCenter * 2.0 * Math.PI))).coerceIn(-85.05112878, 85.05112878)
-
-                                    zoom = newZoom
-                                    currentLat = newLat
-                                    currentLng = newLng
-                                    onCoordinatesChangedState.value?.invoke(newLat, newLng)
-                                }
+                                currentLat = newLat
+                                currentLng = newLng
+                                onCoordinatesChangedState.value?.invoke(newLat, newLng)
                             }
                         }
                     }
