@@ -75,25 +75,25 @@ enum class DropwayMapType(
     val attribution: String,
     val maxNativeZoom: Int
 ) {
-    OPEN_STREET_MAP(
-        label = "OpenStreetMap",
-        layerKey = "osm",
-        iconRes = R.drawable.ic_map,
-        attribution = "© OpenStreetMap contributors",
-        maxNativeZoom = 19
-    ),
     SATELLITE(
         label = "ดาวเทียม",
         layerKey = "satellite",
         iconRes = R.drawable.ic_satellite,
         attribution = "© Esri, Maxar, Earthstar Geographics",
         maxNativeZoom = 18 // Esri guaranteed universal high-res imagery coverage level
+    ),
+    OPEN_STREET_MAP(
+        label = "OpenStreetMap",
+        layerKey = "osm",
+        iconRes = R.drawable.ic_map,
+        attribution = "© OpenStreetMap contributors",
+        maxNativeZoom = 19
     );
 
     fun getTileUrl(x: Int, y: Int, z: Int): String {
         return when (this) {
-            OPEN_STREET_MAP -> "https://tile.openstreetmap.org/$z/$x/$y.png"
             SATELLITE -> "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/$z/$y/$x"
+            OPEN_STREET_MAP -> "https://tile.openstreetmap.org/$z/$x/$y.png"
         }
     }
 }
@@ -211,7 +211,7 @@ fun DropwayMapView(
     val scope = rememberCoroutineScope()
     val isOnline = remember { NetworkUtils.isNetworkAvailable(context) }
 
-    var currentMapType by remember { mutableStateOf(DropwayMapType.OPEN_STREET_MAP) }
+    var currentMapType by remember { mutableStateOf(DropwayMapType.SATELLITE) }
     var currentLat by remember { mutableStateOf(initialLat) }
     var currentLng by remember { mutableStateOf(initialLng) }
     var zoom by remember { mutableStateOf(initialZoom.toDouble()) }
@@ -589,7 +589,7 @@ fun DropwayMapView(
                     .padding(top = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Segmented Switcher [ OpenStreetMap | ดาวเทียม ]
+                // Segmented Switcher [ ดาวเทียม | OpenStreetMap ]
                 Surface(
                     shape = RoundedCornerShape(30.dp),
                     color = Color.White,
