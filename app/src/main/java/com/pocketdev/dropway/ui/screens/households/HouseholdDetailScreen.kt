@@ -27,6 +27,7 @@ import com.pocketdev.dropway.core.model.Resident
 import com.pocketdev.dropway.core.util.LocationUtils
 import com.pocketdev.dropway.core.util.PhoneUtils
 import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
+import com.pocketdev.dropway.ui.components.DropwayStreetViewDialog
 import com.pocketdev.dropway.ui.theme.*
 import kotlinx.coroutines.launch
 
@@ -45,6 +46,7 @@ fun HouseholdDetailScreen(
     var showAddResidentDialog by remember { mutableStateOf(false) }
     var editingResident by remember { mutableStateOf<Resident?>(null) }
     var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+    var showStreetViewDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(householdId) {
         household = repository.getHouseholdById(householdId)
@@ -193,7 +195,7 @@ fun HouseholdDetailScreen(
                             Spacer(modifier = Modifier.height(8.dp))
                             OutlinedButton(
                                 onClick = {
-                                    LocationUtils.openStreetView(context, h.latitude, h.longitude)
+                                    showStreetViewDialog = true
                                 },
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(10.dp)
@@ -431,6 +433,15 @@ fun HouseholdDetailScreen(
                     Text("ยกเลิก")
                 }
             }
+        )
+    }
+
+    if (showStreetViewDialog && h.latitude != null && h.longitude != null) {
+        DropwayStreetViewDialog(
+            latitude = h.latitude,
+            longitude = h.longitude,
+            title = "บ้านเลขที่ ${h.houseNumber} ${h.villageName}".trim(),
+            onDismiss = { showStreetViewDialog = false }
         )
     }
 }

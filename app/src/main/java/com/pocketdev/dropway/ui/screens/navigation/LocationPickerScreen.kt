@@ -28,6 +28,7 @@ import com.pocketdev.dropway.R
 import com.pocketdev.dropway.core.util.LocationUtils
 import com.pocketdev.dropway.ui.components.DropwayMapView
 import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
+import com.pocketdev.dropway.ui.components.DropwayStreetViewDialog
 import com.pocketdev.dropway.ui.theme.*
 import java.util.Locale
 
@@ -51,6 +52,7 @@ fun LocationPickerScreen(
     var lngText by remember(centerLng) {
         mutableStateOf(String.format(Locale.US, "%.6f", centerLng))
     }
+    var showStreetViewDialog by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -126,7 +128,7 @@ fun LocationPickerScreen(
                         .height(320.dp),
                     initialLat = centerLat,
                     initialLng = centerLng,
-                    initialZoom = 16,
+                    initialZoom = 16f,
                     isPickerMode = true,
                     onCoordinatesChanged = { newLat, newLng ->
                         centerLat = newLat
@@ -231,7 +233,7 @@ fun LocationPickerScreen(
                     border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { LocationUtils.openStreetView(context, centerLat, centerLng) }
+                        .clickable { showStreetViewDialog = true }
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
@@ -293,6 +295,15 @@ fun LocationPickerScreen(
                 }
             }
         }
+    }
+
+    if (showStreetViewDialog) {
+        DropwayStreetViewDialog(
+            latitude = centerLat,
+            longitude = centerLng,
+            title = "พิกัดที่เลือก",
+            onDismiss = { showStreetViewDialog = false }
+        )
     }
 }
 

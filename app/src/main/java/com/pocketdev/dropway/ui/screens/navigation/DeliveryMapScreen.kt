@@ -31,6 +31,7 @@ import com.pocketdev.dropway.core.util.MoneyUtils
 import com.pocketdev.dropway.core.util.PhoneUtils
 import com.pocketdev.dropway.ui.components.DeliveryStatusBadge
 import com.pocketdev.dropway.ui.components.DropwayMapView
+import com.pocketdev.dropway.ui.components.DropwayStreetViewDialog
 import com.pocketdev.dropway.ui.components.MapMarkerItem
 import com.pocketdev.dropway.ui.theme.*
 import kotlinx.coroutines.launch
@@ -48,6 +49,7 @@ fun DeliveryMapScreen(
     var selectedFilter by remember { mutableStateOf<DeliveryStatus?>(DeliveryStatus.PENDING) }
     var codOnly by remember { mutableStateOf(false) }
     var selectedParcelId by remember { mutableStateOf<Long?>(null) }
+    var streetViewParcel by remember { mutableStateOf<Parcel?>(null) }
 
     LaunchedEffect(Unit) {
         val today = deliveryRepo.getOrCreateToday()
@@ -163,7 +165,7 @@ fun DeliveryMapScreen(
                     .height(260.dp),
                 initialLat = firstGps?.latitude ?: 18.788300,
                 initialLng = firstGps?.longitude ?: 98.985300,
-                initialZoom = 14,
+                initialZoom = 14f,
                 isPickerMode = false,
                 markers = mapMarkers,
                 onMarkerClick = { clickedId ->
@@ -226,7 +228,7 @@ fun DeliveryMapScreen(
                         },
                         onOpenStreetView = {
                             if (parcel.latitude != null && parcel.longitude != null) {
-                                LocationUtils.openStreetView(context, parcel.latitude, parcel.longitude)
+                                streetViewParcel = parcel
                             }
                         },
                         onCall = {
@@ -244,6 +246,15 @@ fun DeliveryMapScreen(
                 }
             }
         }
+    }
+
+    if (streetViewParcel != null && streetViewParcel!!.latitude != null && streetViewParcel!!.longitude != null) {
+        DropwayStreetViewDialog(
+            latitude = streetViewParcel!!.latitude!!,
+            longitude = streetViewParcel!!.longitude!!,
+            title = "${streetViewParcel!!.recipientName} - ${streetViewParcel!!.destinationAddress}",
+            onDismiss = { streetViewParcel = null }
+        )
     }
 }
 
