@@ -1,6 +1,9 @@
 package com.pocketdev.dropway.ui.screens.households
 
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -20,6 +23,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.pocketdev.dropway.DropwayApplication
 import com.pocketdev.dropway.R
 import com.pocketdev.dropway.core.model.Household
@@ -42,10 +46,46 @@ fun HouseholdListScreen(
     var households by remember { mutableStateOf<List<Household>>(emptyList()) }
     var totalCount by remember { mutableStateOf(0) }
     var distinctVillages by remember { mutableStateOf<List<String>>(emptyList()) }
+
     var isImporting by remember { mutableStateOf(false) }
+    var importStatusMessage by remember { mutableStateOf<String?>(null) }
+    var showImportOptionsDialog by remember { mutableStateOf(false) }
+    var importReplaceMode by remember { mutableStateOf(false) }
+
     var showAddDialog by remember { mutableStateOf(false) }
     var editingHousehold by remember { mutableStateOf<Household?>(null) }
     var quickAddHousehold by remember { mutableStateOf<Household?>(null) }
+
+    // File picker launcher for CSV import
+    val csvPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                isImporting = true
+                importStatusMessage = "กำลังอ่านและประมวลผลไฟล์ CSV จากเครื่อง..."
+                try {
+                    val res = repository.importFromUri(context, uri, clearExisting = importReplaceMode)
+                    totalCount = repository.getCount()
+                    distinctVillages = repository.getDistinctVillages()
+                    searchQuery = ""
+                    selectedVillageFilter = ""
+                    households = repository.searchHouseholds("", "")
+                    Toast.makeText(
+                        context,
+                        "นำเข้าสำเร็จ ${res.householdsCreated} หลังคาเรือน (${res.residentsCreated} รายชื่อ)",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } catch (e: Exception) {
+                    Toast.makeText(context, "เกิดข้อผิดพลาดในการนำเข้า: ${e.message}", Toast.LENGTH_LONG).show()
+                } finally {
+                    isImporting = false
+                    importStatusMessage = null
+                    showImportOptionsDialog = false
+                }
+            }
+        }
+    }
 
     LaunchedEffect(searchQuery, selectedVillageFilter) {
         households = repository.searchHouseholds(searchQuery, selectedVillageFilter)
@@ -88,16 +128,18 @@ fun HouseholdListScreen(
                 .padding(padding)
                 .background(DropwayBackground)
         ) {
-            // Search Input with High-Contrast Bold Text
+            // Top Surface: Header, Action Buttons, Search & Village Filters
             Surface(
                 color = Color.White,
                 shadowElevation = 2.dp,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    // Header Status & Sync Button
+                    // Header Status & Action Buttons (Upload CSV & Sync Master)
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -107,23 +149,65 @@ fun HouseholdListScreen(
                             fontSize = 14.sp,
                             color = DropwayPrimary
                         )
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    isImporting = true
-                                    val res = repository.importFromCsv(context, clearExisting = true)
-                                    isImporting = false
-                                    households = repository.searchHouseholds(searchQuery, selectedVillageFilter)
-                                    totalCount = repository.getCount()
-                                    distinctVillages = repository.getDistinctVillages()
-                                    Toast.makeText(context, "นำเข้าสำเร็จ ${res.householdsCreated} หลังคาเรือน (${res.residentsCreated} รายชื่อ)", Toast.LENGTH_SHORT).show()
-                                }
-                            },
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(painter = painterResource(id = R.drawable.ic_refresh), contentDescription = null, modifier = Modifier.size(13.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (isImporting) "กำลังนำเข้า..." else "ซิงค์ CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            // Upload CSV Button
+                            Button(
+                                onClick = { showImportOptionsDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                modifier = Modifier.height(30.dp),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_document),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp),
+                                    tint = Color.White
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "อัพโหลด CSV",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                            }
+
+                            // Sync Master CSV Button
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        isImporting = true
+                                        importStatusMessage = "กำลังซิงค์ Master CSV..."
+                                        val res = repository.importFromCsv(context, clearExisting = false)
+                                        isImporting = false
+                                        importStatusMessage = null
+                                        households = repository.searchHouseholds(searchQuery, selectedVillageFilter)
+                                        totalCount = repository.getCount()
+                                        distinctVillages = repository.getDistinctVillages()
+                                        Toast.makeText(
+                                            context,
+                                            "ซิงค์สำเร็จ ${res.householdsCreated} หลังคาเรือน (${res.residentsCreated} รายชื่อ)",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(30.dp),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_refresh),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("ซิงค์ Master", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
 
@@ -184,13 +268,16 @@ fun HouseholdListScreen(
                 }
             }
 
-            // Household List
+            // Household List / Empty State
             if (households.isEmpty()) {
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(24.dp)
+                    ) {
                         Icon(
                             painter = painterResource(id = R.drawable.ic_home),
                             contentDescription = null,
@@ -206,37 +293,70 @@ fun HouseholdListScreen(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = if (searchQuery.isEmpty()) "สามารถนำเข้าข้อมูลบ้าน 4,500+ รายการจากไฟล์ CSV ได้ทันที" else "ลองค้นหาด้วยคำค้นอื่น",
+                            text = if (searchQuery.isEmpty()) {
+                                "สามารถอัพโหลดไฟล์ CSV ของคุณเพื่อลิสต์บ้านทั้งหมด หรือโหลดชุดข้อมูลเริ่มต้นได้ทันที"
+                            } else {
+                                "ลองค้นหาด้วยคำค้นอื่น"
+                            },
                             fontSize = 13.sp,
                             color = TextMuted,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                         if (searchQuery.isEmpty()) {
-                            Spacer(modifier = Modifier.height(16.dp))
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            // Big Upload Button in Empty State
                             Button(
+                                onClick = { showImportOptionsDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_document),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = Color.White
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("อัพโหลดไฟล์ CSV จากเครื่อง", fontWeight = FontWeight.Bold, color = Color.White)
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Master Data Quick Button
+                            OutlinedButton(
                                 onClick = {
                                     scope.launch {
                                         isImporting = true
+                                        importStatusMessage = "กำลังนำเข้าข้อมูล Master 4,500+ รายการ..."
                                         val res = repository.importFromCsv(context, clearExisting = false)
                                         isImporting = false
-                                        households = repository.searchHouseholds(searchQuery, selectedVillageFilter)
+                                        importStatusMessage = null
+                                        households = repository.searchHouseholds("", "")
                                         totalCount = repository.getCount()
                                         distinctVillages = repository.getDistinctVillages()
-                                        Toast.makeText(context, "นำเข้าสำเร็จ ${res.householdsCreated} หลังคาเรือน (${res.residentsCreated} รายชื่อ)", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(
+                                            context,
+                                            "นำเข้าสำเร็จ ${res.householdsCreated} หลังคาเรือน (${res.residentsCreated} รายชื่อ)",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
                                     }
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary),
-                                shape = RoundedCornerShape(10.dp)
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp)
                             ) {
-                                if (isImporting) {
-                                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text("กำลังนำเข้าข้อมูลบ้าน...", fontWeight = FontWeight.Bold)
-                                } else {
-                                    Icon(painter = painterResource(id = R.drawable.ic_document), contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("นำเข้าข้อมูลบ้านจาก .ai/all_home.csv", fontWeight = FontWeight.Bold)
-                                }
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_refresh),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("โหลดข้อมูล Master 4,500+ หลังคาเรือน", fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -269,16 +389,183 @@ fun HouseholdListScreen(
         }
     }
 
+    // Import CSV Options Dialog
+    if (showImportOptionsDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isImporting) showImportOptionsDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_document),
+                        contentDescription = null,
+                        tint = DropwayPrimary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("นำเข้าข้อมูลบ้านจาก CSV", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                }
+            },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "เลือกวิธีการนำเข้าข้อมูลบ้านเข้าสู่ระบบ Dropway",
+                        fontSize = 13.sp,
+                        color = TextSecondary
+                    )
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text("โหมดการบันทึกข้อมูล:", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = TextPrimary)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = !importReplaceMode,
+                            onClick = { importReplaceMode = false },
+                            label = { Text("เพิ่มต่อจากเดิม") },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = importReplaceMode,
+                            onClick = { importReplaceMode = true },
+                            label = { Text("ลบเก่าแล้วแทนที่") },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // Option 1: File Picker from Storage
+                    Button(
+                        onClick = {
+                            csvPickerLauncher.launch(arrayOf("*/*"))
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_document),
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = Color.White
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("เลือกไฟล์ CSV จากเครื่อง", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Option 2: Default Master Data
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                isImporting = true
+                                importStatusMessage = "กำลังนำเข้าข้อมูล Master 4,500+ รายการ..."
+                                try {
+                                    val res = repository.importFromCsv(context, clearExisting = importReplaceMode)
+                                    totalCount = repository.getCount()
+                                    distinctVillages = repository.getDistinctVillages()
+                                    searchQuery = ""
+                                    selectedVillageFilter = ""
+                                    households = repository.searchHouseholds("", "")
+                                    Toast.makeText(
+                                        context,
+                                        "นำเข้าสำเร็จ ${res.householdsCreated} หลังคาเรือน (${res.residentsCreated} รายชื่อ)",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "เกิดข้อผิดพลาด: ${e.message}", Toast.LENGTH_LONG).show()
+                                } finally {
+                                    isImporting = false
+                                    importStatusMessage = null
+                                    showImportOptionsDialog = false
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_refresh),
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("ใช้ชุดข้อมูล Master (4,500+ หลังคาเรือน)", fontWeight = FontWeight.Bold)
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "ระบบรองรับไฟล์ CSV ทุกรูปแบบ (ทั้งไฟล์จาก Excel, Google Sheets, หรือ all_home.csv) โดยจะแยกบ้านเลขที่, หมู่บ้าน, ชื่อผู้รับ, เบอร์โทร และพิกัดให้อัตโนมัติ",
+                        fontSize = 11.sp,
+                        color = TextMuted,
+                        lineHeight = 15.sp
+                    )
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(
+                    onClick = { showImportOptionsDialog = false },
+                    enabled = !isImporting
+                ) {
+                    Text("ปิด", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
+    }
+
+    // Modal Progress Dialog During Import
+    if (isImporting) {
+        Dialog(onDismissRequest = {}) {
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = Color.White,
+                modifier = Modifier.padding(20.dp)
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator(color = DropwayPrimary, modifier = Modifier.size(40.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = importStatusMessage ?: "กำลังนำเข้าข้อมูล...",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = TextPrimary
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "ระบบกำลังแยกบ้านเลขที่ หมู่ และรายชื่อลูกบ้าน กรุณารอสักครู่",
+                        fontSize = 12.sp,
+                        color = TextSecondary,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+
     // Add / Edit Household Dialog
     if (showAddDialog) {
         AddEditHouseholdDialog(
             household = editingHousehold,
             onDismiss = { showAddDialog = false },
-            onSave = { saved ->
+            onSaveWithResident = { savedHouse, residentName, residentPhone ->
                 scope.launch {
-                    repository.saveHousehold(saved)
+                    repository.saveHouseholdWithResident(savedHouse, residentName, residentPhone)
                     households = repository.searchHouseholds(searchQuery, selectedVillageFilter)
+                    totalCount = repository.getCount()
+                    distinctVillages = repository.getDistinctVillages()
                     showAddDialog = false
+                    Toast.makeText(
+                        context,
+                        "บันทึกข้อมูลบ้านเลขที่ ${savedHouse.houseNumber} สำเร็จ",
+                        Toast.LENGTH_SHORT
+                    ).show()
                 }
             }
         )

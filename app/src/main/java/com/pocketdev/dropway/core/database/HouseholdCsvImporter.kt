@@ -3,11 +3,11 @@ package com.pocketdev.dropway.core.database
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteStatement
+import android.net.Uri
 import com.pocketdev.dropway.core.util.PhoneUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.InputStream
-import java.io.InputStreamReader
 import java.util.regex.Pattern
 
 data class ImportResult(
@@ -39,6 +39,19 @@ object HouseholdCsvImporter {
         }
     }
 
+    suspend fun importFromUri(
+        context: Context,
+        dbHelper: DropwayDatabaseHelper,
+        uri: Uri,
+        clearExisting: Boolean = false
+    ): ImportResult = withContext(Dispatchers.IO) {
+        val stream = context.contentResolver.openInputStream(uri)
+            ?: return@withContext ImportResult(0, 0, 0, 0)
+        stream.use { s ->
+            importFromInputStream(dbHelper, s, clearExisting)
+        }
+    }
+
     suspend fun importFromInputStream(
         dbHelper: DropwayDatabaseHelper,
         inputStream: InputStream,
@@ -53,24 +66,34 @@ object HouseholdCsvImporter {
         }
 
         // Header mapping
-        val header = rows[0].map { it.trim().lowercase().removePrefix("\uFEFF") }
-        val idIdx = header.indexOf("id").takeIf { it >= 0 } ?: 0
-        val nameIdx = header.indexOf("full_name").takeIf { it >= 0 } ?: 1
-        val phoneIdx = header.indexOf("phone").takeIf { it >= 0 } ?: 2
-        val addrIdx = header.indexOf("address").takeIf { it >= 0 } ?: 3
-        val latIdx = header.indexOf("lat").takeIf { it >= 0 } ?: 4
-        val lngIdx = header.indexOf("lng").takeIf { it >= 0 } ?: 5
-        val noteIdx = header.indexOf("note").takeIf { it >= 0 } ?: 6
+        val rawHeader = rows[0]
+        val header = rawHeader.map { it.trim().lowercase().removePrefix("\uFEFF") }
 
-        data class CsvRowData(
-            val id: String,
-            val fullName: String,
-            val phone: String,
-            val address: String,
-            val lat: Double?,
-            val lng: Double?,
-            val note: String
-        )
+        val idIdx = findColumnIndex(header, listOf("id", "no", "no.", "num", "ลำดับ", "ลำดับที่", "code"), listOf("id", "ลำดับ"))
+        val nameIdx = findColumnIndex(header, listOf("full_name", "fullname", "name", "customer_name", "receiver_name", "recipient", "ชื่อ", "ชื่อผู้รับ", "ชื่อ-สกุล", "ชื่อ-นามสกุล", "ผู้รับ", "ชื่อผู้รับพัสดุ"), listOf("name", "ชื่อ", "ผู้รับ"))
+        val phoneIdx = findColumnIndex(header, listOf("phone", "phone_number", "phonenumber", "tel", "telephone", "mobile", "contact", "เบอร์", "เบอร์โทร", "เบอร์โทรศัพท์", "โทร"), listOf("phone", "tel", "โทร", "เบอร์"))
+        val addrIdx = findColumnIndex(header, listOf("address", "addr", "full_address", "ที่อยู่", "ที่อยู่จัดส่ง", "ที่อยู่ผู้รับ"), listOf("address", "addr", "ที่อยู่"))
+        val houseNumIdx = findColumnIndex(header, listOf("house_number", "house_no", "housenumber", "houseno", "บ้านเลขที่", "เลขที่"), listOf("house_number", "บ้านเลขที่"))
+        val villageIdx = findColumnIndex(header, listOf("village", "moo", "หมู่", "หมู่ที่", "ม.", "หมู่บ้าน"), listOf("village", "moo", "หมู่"))
+        val subdistIdx = findColumnIndex(header, listOf("subdistrict", "sub_district", "tambon", "ตำบล", "ต.", "แขวง"), listOf("subdistrict", "tambon", "ตำบล"))
+        val distIdx = findColumnIndex(header, listOf("district", "amphoe", "amphur", "อำเภอ", "อ.", "เขต"), listOf("district", "amphoe", "อำเภอ"))
+        val provIdx = findColumnIndex(header, listOf("province", "changwat", "จังหวัด", "จ."), listOf("province", "จังหวัด"))
+        val postalIdx = findColumnIndex(header, listOf("postal_code", "postalcode", "postcode", "zip", "zipcode", "zip_code", "รหัสไปรษณีย์"), listOf("postal", "zip", "ไปรษณีย์"))
+        val latIdx = findColumnIndex(header, listOf("lat", "latitude", "ละติจูด", "พิกัดละติจูด", "y"), listOf("lat", "ละติจูด"))
+        val lngIdx = findColumnIndex(header, listOf("lng", "lon", "long", "longitude", "ลองจิจูด", "พิกัดลองจิจูด", "x"), listOf("lng", "lon", "longitude", "ลองจิจูด"))
+        val gpsIdx = findColumnIndex(header, listOf("gps", "coord", "coords", "coordinate", "coordinates", "location", "พิกัด", "ตำแหน่ง"), listOf("gps", "coord", "พิกัด"))
+        val noteIdx = findColumnIndex(header, listOf("note", "notes", "remark", "remarks", "comment", "detail", "หมายเหตุ", "โน้ต", "จุดสังเกต"), listOf("note", "remark", "หมายเหตุ", "โน้ต"))
+
+        val hasRecognizedHeader = nameIdx >= 0 || phoneIdx >= 0 || addrIdx >= 0 || latIdx >= 0 || houseNumIdx >= 0
+        val startRow = if (hasRecognizedHeader) 1 else 0
+
+        val effIdIdx = if (hasRecognizedHeader && idIdx >= 0) idIdx else 0
+        val effNameIdx = if (hasRecognizedHeader && nameIdx >= 0) nameIdx else 1
+        val effPhoneIdx = if (hasRecognizedHeader && phoneIdx >= 0) phoneIdx else 2
+        val effAddrIdx = if (hasRecognizedHeader && addrIdx >= 0) addrIdx else 3
+        val effLatIdx = if (hasRecognizedHeader && latIdx >= 0) latIdx else 4
+        val effLngIdx = if (hasRecognizedHeader && lngIdx >= 0) lngIdx else 5
+        val effNoteIdx = if (hasRecognizedHeader && noteIdx >= 0) noteIdx else 6
 
         data class HouseGrouping(
             val houseNumber: String,
@@ -84,34 +107,98 @@ object HouseholdCsvImporter {
             var longitude: Double?,
             val addressDescription: String,
             var notes: String,
-            val residents: MutableList<Pair<String, String>> = mutableListOf() // (name, phone)
+            val residents: MutableList<Pair<String, String>> = mutableListOf()
         )
 
         val houseMap = linkedMapOf<String, HouseGrouping>()
         var parsedCount = 0
 
-        for (i in 1 until rows.size) {
+        for (i in startRow until rows.size) {
             val r = rows[i]
-            if (r.isEmpty()) continue
+            if (r.isEmpty() || r.all { it.isBlank() }) continue
             parsedCount++
 
-            val id = if (idIdx < r.size) r[idIdx].trim() else ""
-            val name = if (nameIdx < r.size) r[nameIdx].trim() else ""
-            val phone = if (phoneIdx < r.size) PhoneUtils.normalize(r[phoneIdx].trim()) else ""
-            val addr = if (addrIdx < r.size) r[addrIdx].trim() else ""
-            val latStr = if (latIdx < r.size) r[latIdx].trim() else ""
-            val lngStr = if (lngIdx < r.size) r[lngIdx].trim() else ""
-            val lat = latStr.toDoubleOrNull()
-            val lng = lngStr.toDoubleOrNull()
-            val note = if (noteIdx < r.size) r[noteIdx].trim().replace("\u27a1", "->") else ""
+            val id = if (effIdIdx < r.size) sanitizeText(r[effIdIdx]) else ""
+            val name = if (effNameIdx < r.size) sanitizeText(r[effNameIdx]) else ""
+            val phone = if (effPhoneIdx < r.size) PhoneUtils.normalize(sanitizeText(r[effPhoneIdx])) else ""
+            val rawAddr = if (effAddrIdx < r.size) sanitizeText(r[effAddrIdx]) else ""
+            val note = if (effNoteIdx < r.size) sanitizeText(r[effNoteIdx]) else ""
 
-            val key = if (addr.isNotBlank()) {
-                if (note.isNotBlank()) "$addr || $note" else addr
-            } else {
-                "$id || $note"
+            // Coordinates
+            var lat: Double? = null
+            var lng: Double? = null
+            if (effLatIdx < r.size) {
+                lat = r[effLatIdx].trim().toDoubleOrNull()
+            }
+            if (effLngIdx < r.size) {
+                lng = r[effLngIdx].trim().toDoubleOrNull()
+            }
+            if ((lat == null || lng == null) && gpsIdx >= 0 && gpsIdx < r.size) {
+                val gpsStr = r[gpsIdx].trim()
+                val parts = gpsStr.split(Pattern.compile("[,\\s]+"))
+                if (parts.size >= 2) {
+                    lat = parts[0].toDoubleOrNull()
+                    lng = parts[1].toDoubleOrNull()
+                }
             }
 
-            val parsedAddr = parseThaiAddress(addr, name, note)
+            // Separate address fields if available
+            val rawHouseNum = if (houseNumIdx >= 0 && houseNumIdx < r.size) sanitizeText(r[houseNumIdx]) else ""
+            val rawVillage = if (villageIdx >= 0 && villageIdx < r.size) sanitizeText(r[villageIdx]).removePrefix("หมู่").removePrefix("ม.").trim() else ""
+            val rawSubdist = if (subdistIdx >= 0 && subdistIdx < r.size) sanitizeText(r[subdistIdx]).removePrefix("ตำบล").removePrefix("ต.").trim() else ""
+            val rawDist = if (distIdx >= 0 && distIdx < r.size) sanitizeText(r[distIdx]).removePrefix("อำเภอ").removePrefix("อ.").trim() else ""
+            val rawProv = if (provIdx >= 0 && provIdx < r.size) sanitizeText(r[provIdx]).removePrefix("จังหวัด").removePrefix("จ.").trim() else ""
+            val rawPostal = if (postalIdx >= 0 && postalIdx < r.size) sanitizeText(r[postalIdx]) else ""
+
+            val parsedAddr = if (rawAddr.isNotBlank()) {
+                val p = parseThaiAddress(rawAddr, name, note)
+                p.copy(
+                    houseNumber = if (rawHouseNum.isNotBlank()) rawHouseNum else p.houseNumber,
+                    village = if (rawVillage.isNotBlank()) rawVillage else p.village,
+                    subdistrict = if (rawSubdist.isNotBlank()) rawSubdist else p.subdistrict,
+                    district = if (rawDist.isNotBlank()) rawDist else p.district,
+                    province = if (rawProv.isNotBlank()) rawProv else p.province,
+                    postalCode = if (rawPostal.isNotBlank()) rawPostal else p.postalCode
+                )
+            } else {
+                val hn = if (rawHouseNum.isNotBlank()) rawHouseNum else {
+                    when {
+                        note.isNotBlank() -> note.split("\\s+".toRegex()).firstOrNull()?.take(25) ?: "จุดส่งพัสดุ"
+                        name.isNotBlank() -> name.split("\\s+".toRegex()).firstOrNull()?.take(25) ?: "จุดส่งพัสดุ"
+                        else -> "จุดส่งพัสดุ"
+                    }
+                }
+                val descParts = mutableListOf<String>()
+                if (hn.isNotBlank()) descParts.add("เลขที่ $hn")
+                if (rawVillage.isNotBlank()) descParts.add("หมู่ $rawVillage")
+                if (rawSubdist.isNotBlank()) descParts.add("ต.$rawSubdist")
+                if (rawDist.isNotBlank()) descParts.add("อ.$rawDist")
+                if (rawProv.isNotBlank()) descParts.add("จ.$rawProv")
+                if (rawPostal.isNotBlank()) descParts.add(rawPostal)
+                val desc = if (descParts.isNotEmpty()) descParts.joinToString(" ") else note.ifBlank { "จุดส่งพัสดุ" }
+                ParsedAddressComponents(
+                    houseNumber = hn,
+                    village = rawVillage,
+                    villageName = "",
+                    subdistrict = rawSubdist,
+                    district = rawDist,
+                    province = rawProv,
+                    postalCode = rawPostal,
+                    addressDescription = desc
+                )
+            }
+
+            val key = when {
+                parsedAddr.houseNumber.isNotBlank() && parsedAddr.village.isNotBlank() -> {
+                    "${parsedAddr.houseNumber}__M${parsedAddr.village}__$note"
+                }
+                rawAddr.isNotBlank() -> {
+                    if (note.isNotBlank()) "$rawAddr || $note" else rawAddr
+                }
+                else -> {
+                    "$id || $note || ${parsedAddr.houseNumber}"
+                }
+            }
 
             val existing = houseMap[key]
             if (existing == null) {
@@ -228,6 +315,39 @@ object HouseholdCsvImporter {
         )
     }
 
+    private fun findColumnIndex(header: List<String>, exactKeywords: List<String>, partialKeywords: List<String>): Int {
+        for ((idx, col) in header.withIndex()) {
+            val normalized = col.lowercase().trim().replace("\uFEFF", "")
+            if (exactKeywords.any { it.equals(normalized, ignoreCase = true) }) {
+                return idx
+            }
+        }
+        for ((idx, col) in header.withIndex()) {
+            val clean = col.lowercase().trim().replace("\uFEFF", "").replace("_", "").replace("-", "").replace(" ", "")
+            if (exactKeywords.any { it.replace("_", "").replace("-", "").replace(" ", "").equals(clean, ignoreCase = true) }) {
+                return idx
+            }
+        }
+        for (kw in partialKeywords) {
+            val kwClean = kw.lowercase().trim()
+            for ((idx, col) in header.withIndex()) {
+                val clean = col.lowercase().trim().replace("\uFEFF", "")
+                if (clean.contains(kwClean)) {
+                    return idx
+                }
+            }
+        }
+        return -1
+    }
+
+    private fun sanitizeText(input: String): String {
+        if (input.isBlank()) return ""
+        var s = input.replace("\u27a1", "->")
+        s = s.replace("[\\uD800-\\uDBFF][\\uDC00-\\uDFFF]".toRegex(), "")
+        s = s.replace("[\\u2600-\\u27BF\\u2B50-\\u2B55\\u203C\\u2049\\u2139\\u2194-\\u21AA]".toRegex(), "")
+        return s.trim()
+    }
+
     private fun parseThaiAddress(rawAddr: String, fullName: String, note: String): ParsedAddressComponents {
         val addr = rawAddr.trim()
         if (addr.isBlank()) {
@@ -305,28 +425,57 @@ object HouseholdCsvImporter {
     )
 
     /**
-     * RFC 4180 compliant CSV parser supporting multi-line quoted fields.
+     * RFC 4180 compliant CSV parser supporting multi-line quoted fields,
+     * UTF-8 BOM, and automatic delimiter detection (comma, semicolon, tab).
      */
     fun parseCsv(inputStream: InputStream): List<List<String>> {
-        val reader = InputStreamReader(inputStream, Charsets.UTF_8)
+        val bytes = inputStream.readBytes()
+        if (bytes.isEmpty()) return emptyList()
+
+        // Strip UTF-8 BOM if present
+        val content = if (bytes.size >= 3 && bytes[0] == 0xEF.toByte() && bytes[1] == 0xBB.toByte() && bytes[2] == 0xBF.toByte()) {
+            String(bytes, 3, bytes.size - 3, Charsets.UTF_8)
+        } else {
+            String(bytes, Charsets.UTF_8)
+        }
+
+        val firstLine = content.lineSequence().firstOrNull() ?: ""
+        var commaCount = 0
+        var semicolonCount = 0
+        var tabCount = 0
+        var inQ = false
+        for (ch in firstLine) {
+            if (ch == '"') inQ = !inQ
+            else if (!inQ) {
+                when (ch) {
+                    ',' -> commaCount++
+                    ';' -> semicolonCount++
+                    '\t' -> tabCount++
+                }
+            }
+        }
+        val delimiter = when {
+            semicolonCount > commaCount && semicolonCount > tabCount -> ';'
+            tabCount > commaCount && tabCount > semicolonCount -> '\t'
+            else -> ','
+        }
+
         val records = mutableListOf<List<String>>()
         val currentField = StringBuilder()
         val currentRow = mutableListOf<String>()
         var inQuotes = false
 
-        var chInt: Int
-        while (reader.read().also { chInt = it } != -1) {
-            val c = chInt.toChar()
+        var i = 0
+        val len = content.length
+        while (i < len) {
+            val c = content[i]
             if (inQuotes) {
                 if (c == '"') {
-                    // Peek ahead
-                    reader.mark(1)
-                    val nextInt = reader.read()
-                    if (nextInt != -1 && nextInt.toChar() == '"') {
+                    if (i + 1 < len && content[i + 1] == '"') {
                         currentField.append('"')
+                        i++
                     } else {
                         inQuotes = false
-                        reader.reset()
                     }
                 } else {
                     currentField.append(c)
@@ -334,7 +483,7 @@ object HouseholdCsvImporter {
             } else {
                 when (c) {
                     '"' -> inQuotes = true
-                    ',' -> {
+                    delimiter -> {
                         currentRow.add(currentField.toString())
                         currentField.setLength(0)
                     }
@@ -350,6 +499,7 @@ object HouseholdCsvImporter {
                     else -> currentField.append(c)
                 }
             }
+            i++
         }
 
         if (currentField.isNotEmpty() || currentRow.isNotEmpty()) {

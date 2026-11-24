@@ -1,7 +1,10 @@
 package com.pocketdev.dropway.ui.screens.profile
 
 import android.content.Context
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -107,6 +110,25 @@ fun ProfileScreen(
             var householdCount by remember { mutableStateOf(0) }
             var isSyncingCsv by remember { mutableStateOf(false) }
 
+            val csvUploadLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.OpenDocument()
+            ) { uri: Uri? ->
+                if (uri != null) {
+                    scope.launch {
+                        isSyncingCsv = true
+                        try {
+                            val res = householdRepo.importFromUri(context, uri, clearExisting = false)
+                            householdCount = householdRepo.getCount()
+                            Toast.makeText(context, "นำเข้าสำเร็จ ${res.householdsCreated} หลังคาเรือน (${res.residentsCreated} รายชื่อ)", Toast.LENGTH_SHORT).show()
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "เกิดข้อผิดพลาด: ${e.message}", Toast.LENGTH_SHORT).show()
+                        } finally {
+                            isSyncingCsv = false
+                        }
+                    }
+                }
+            }
+
             LaunchedEffect(Unit) {
                 householdCount = householdRepo.getCount()
             }
@@ -123,7 +145,7 @@ fun ProfileScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("ฐานข้อมูลบ้าน (.ai/all_home.csv)", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                        Text("ฐานข้อมูลบ้านหลัก (Master Households)", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
                         Surface(
                             color = DropwayPrimary.copy(alpha = 0.1f),
                             shape = RoundedCornerShape(6.dp)
@@ -139,11 +161,24 @@ fun ProfileScreen(
                     }
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "ข้อมูลบ้านและลูกบ้าน 4,500+ รายการจากไฟล์ CSV พร้อมพิกัด GPS และโน้ตการนำทาง",
+                        "รองรับการอัพโหลดไฟล์ CSV ของคุณเพื่อนำเข้าข้อมูลบ้าน พิกัด GPS และโน้ตการนำทางเข้าสู่ระบบทันที",
                         fontSize = 12.sp,
                         color = TextSecondary
                     )
                     Spacer(modifier = Modifier.height(10.dp))
+                    Button(
+                        onClick = {
+                            csvUploadLauncher.launch(arrayOf("*/*"))
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(painter = painterResource(id = R.drawable.ic_document), contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("อัพโหลดไฟล์ CSV จากเครื่อง", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
                     OutlinedButton(
                         onClick = {
                             scope.launch {
@@ -162,7 +197,7 @@ fun ProfileScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Text("กำลังนำเข้าข้อมูล...")
                         } else {
-                            Text("ซิงค์ข้อมูลบ้านใหม่จาก CSV (Reload Master Data)")
+                            Text("ซิงค์ข้อมูล Master เริ่มต้น (4,500+ รายการ)")
                         }
                     }
                 }

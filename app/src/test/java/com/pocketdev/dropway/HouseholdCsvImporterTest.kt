@@ -34,4 +34,27 @@ class HouseholdCsvImporterTest {
         assertEquals("1464 ม.3 บ.แม่ตาวแพะ, แม่สอด", rows[1][3])
         assertEquals("บ้านหลังที่ 2, ซ้ายมือ", rows[1][6])
     }
+
+    @Test
+    fun testParseCsvWithSemicolonDelimiter() {
+        val csv = """
+            id;name;phone;address;lat;lng;note
+            1;มานะ ชูใจ;0891112233;99 ม.2 ต.ป่าแดด;18.788;98.985;ซอย 3
+        """.trimIndent()
+
+        val rows = HouseholdCsvImporter.parseCsv(ByteArrayInputStream(csv.toByteArray(Charsets.UTF_8)))
+        assertEquals(2, rows.size)
+        assertEquals("มานะ ชูใจ", rows[1][1])
+        assertEquals("0891112233", rows[1][2])
+        assertEquals("99 ม.2 ต.ป่าแดด", rows[1][3])
+    }
+
+    @Test
+    fun testParseCsvWithUtf8Bom() {
+        val csv = "\uFEFFid,name,phone,address\n1,กานดา,0810000000,123 ม.1"
+        val rows = HouseholdCsvImporter.parseCsv(ByteArrayInputStream(csv.toByteArray(Charsets.UTF_8)))
+        assertEquals(2, rows.size)
+        assertEquals("id", rows[0][0])
+        assertEquals("กานดา", rows[1][1])
+    }
 }

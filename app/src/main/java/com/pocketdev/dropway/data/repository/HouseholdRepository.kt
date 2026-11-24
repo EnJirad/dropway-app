@@ -1,6 +1,7 @@
 package com.pocketdev.dropway.data.repository
 
 import android.content.Context
+import android.net.Uri
 import com.pocketdev.dropway.core.database.DropwayDatabaseHelper
 import com.pocketdev.dropway.core.database.HouseholdCsvImporter
 import com.pocketdev.dropway.core.database.ImportResult
@@ -11,6 +12,7 @@ import com.pocketdev.dropway.core.model.Household
 import com.pocketdev.dropway.core.model.Resident
 import com.pocketdev.dropway.core.util.HouseholdMatcher
 import com.pocketdev.dropway.core.util.MatchResult
+import com.pocketdev.dropway.core.util.PhoneUtils
 import kotlinx.coroutines.flow.Flow
 
 class HouseholdRepository(
@@ -49,6 +51,16 @@ class HouseholdRepository(
         return result
     }
 
+    suspend fun importFromUri(context: Context, uri: Uri, clearExisting: Boolean = false): ImportResult {
+        val helper = dbHelper ?: DropwayDatabaseHelper.getInstance(context)
+        val result = HouseholdCsvImporter.importFromUri(context, helper, uri, clearExisting = clearExisting)
+        eventDao.logEvent(
+            eventType = "CSV_IMPORT_COMPLETED",
+            details = "นำเข้าข้อมูลจากไฟล์ CSV สำเร็จ ${result.householdsCreated} หลังคาเรือน (${result.residentsCreated} รายชื่อ) ใช้เวลา ${result.durationMs}ms"
+        )
+        return result
+    }
+
     suspend fun searchHouseholds(query: String, villageFilter: String = ""): List<Household> {
         return householdDao.search(query, villageFilter)
     }
@@ -65,6 +77,23 @@ class HouseholdRepository(
             eventDao.logEvent(householdId = household.id, eventType = "HOUSEHOLD_UPDATED", details = "แก้ไขข้อมูลบ้านเลขที่ ${household.houseNumber}")
             household.id
         }
+    }
+
+    suspend fun saveHouseholdWithResident(
+        household: Household,
+        residentName: String = "",
+        residentPhone: String = ""
+    ): Long {
+        val houseId = saveHousehold(household)
+        if (residentName.isNotBlank() || residentPhone.isNotBlank()) {
+            val resident = Resident(
+                householdId = houseId,
+                fullName = residentName.ifBlank { "ไม่ระบุชื่อ" },
+                phoneNumber = PhoneUtils.normalize(residentPhone)
+            )
+            saveResident(resident)
+        }
+        return houseId
     }
 
     suspend fun deleteHousehold(id: Long): Boolean {

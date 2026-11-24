@@ -28,7 +28,8 @@ import java.util.Locale
 fun AddEditHouseholdDialog(
     household: Household? = null,
     onDismiss: () -> Unit,
-    onSave: (Household) -> Unit
+    onSave: (Household) -> Unit = {},
+    onSaveWithResident: ((Household, String, String) -> Unit)? = null
 ) {
     var houseNumber by remember { mutableStateOf(household?.houseNumber ?: "") }
     var village by remember { mutableStateOf(household?.village ?: "") }
@@ -39,6 +40,10 @@ fun AddEditHouseholdDialog(
     var postalCode by remember { mutableStateOf(household?.postalCode ?: "") }
     var addressDescription by remember { mutableStateOf(household?.addressDescription ?: "") }
     var notes by remember { mutableStateOf(household?.notes ?: "") }
+
+    // Resident fields for quick simultaneous creation
+    var residentName by remember { mutableStateOf("") }
+    var residentPhone by remember { mutableStateOf("") }
 
     // Single coordinate string state (latitude,longitude)
     var coordinateText by remember {
@@ -166,6 +171,35 @@ fun AddEditHouseholdDialog(
                     placeholder = { Text("เช่น หมาดุ, ฝากข้างบ้านได้") }
                 )
 
+                // Resident Section (Especially for new household creation)
+                if (household == null) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        text = "ข้อมูลผู้อยู่อาศัย / ผู้รับพัสดุ (ไม่บังคับ)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = DropwayPrimary
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    DropwayOutlinedTextField(
+                        value = residentName,
+                        onValueChange = { residentName = it },
+                        label = { Text("ชื่อ-นามสกุล ผู้รับ / ลูกบ้าน") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("เช่น นายสมชาย ใจดี") }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    DropwayOutlinedTextField(
+                        value = residentPhone,
+                        onValueChange = { residentPhone = it },
+                        label = { Text("เบอร์โทรศัพท์ติดต่อ") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        placeholder = { Text("เช่น 0812345678") }
+                    )
+                }
+
                 Spacer(modifier = Modifier.height(14.dp))
 
                 // Single Coordinate Field (ละติจูด,ลองจิจูด) with Trailing Map Icon Button
@@ -253,7 +287,11 @@ fun AddEditHouseholdDialog(
                                 latitude = lat,
                                 longitude = lng
                             )
-                            onSave(result)
+                            if (onSaveWithResident != null) {
+                                onSaveWithResident(result, residentName.trim(), residentPhone.trim())
+                            } else {
+                                onSave(result)
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary)
                     ) {
