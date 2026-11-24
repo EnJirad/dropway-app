@@ -140,6 +140,28 @@ class ParcelDao(private val dbHelper: DropwayDatabaseHelper) {
         }
     }
 
+    suspend fun getRecentParcelByPhone(phone: String): Parcel? = withContext(Dispatchers.IO) {
+        val normPhone = com.pocketdev.dropway.core.util.PhoneUtils.normalize(phone)
+        if (normPhone.isBlank()) return@withContext null
+        readableDb.rawQuery(
+            "SELECT * FROM parcels WHERE recipient_phone = ? AND household_id IS NOT NULL ORDER BY id DESC LIMIT 1",
+            arrayOf(normPhone)
+        ).use { cursor ->
+            if (cursor.moveToFirst()) mapCursorToParcel(cursor) else null
+        }
+    }
+
+    suspend fun getRecentParcelByName(name: String): Parcel? = withContext(Dispatchers.IO) {
+        val clean = name.trim()
+        if (clean.isBlank()) return@withContext null
+        readableDb.rawQuery(
+            "SELECT * FROM parcels WHERE recipient_name LIKE ? AND household_id IS NOT NULL ORDER BY id DESC LIMIT 1",
+            arrayOf("%$clean%")
+        ).use { cursor ->
+            if (cursor.moveToFirst()) mapCursorToParcel(cursor) else null
+        }
+    }
+
     suspend fun getByDayId(dayId: Long): List<Parcel> = withContext(Dispatchers.IO) {
         val list = mutableListOf<Parcel>()
         readableDb.rawQuery("SELECT * FROM parcels WHERE delivery_day_id = ? ORDER BY id DESC", arrayOf(dayId.toString())).use { cursor ->

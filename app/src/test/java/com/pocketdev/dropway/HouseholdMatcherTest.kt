@@ -55,6 +55,23 @@ class HouseholdMatcherTest {
     }
 
     @Test
+    fun testMatchWithMooNormalization() {
+        val match = HouseholdMatcher.findBestMatch(
+            households = households,
+            residents = residents,
+            targetHouseNumber = "บ้านเลขที่ 12/3",
+            targetVillage = "หมู่ 2",
+            targetPhone = "",
+            targetName = "คุณสมชาย"
+        )
+
+        assertNotNull(match)
+        assertEquals(3L, match!!.household.id)
+        assertEquals("12/3", match.household.houseNumber)
+        assertTrue(match.confidenceScore >= 80)
+    }
+
+    @Test
     fun testNoMatchForUnknownData() {
         val match = HouseholdMatcher.findBestMatch(
             households = households,

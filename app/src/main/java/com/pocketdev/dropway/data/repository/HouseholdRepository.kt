@@ -67,10 +67,11 @@ class HouseholdRepository(
 
     // Household matching
     suspend fun findMatchingHousehold(
-        houseNumber: String,
-        village: String,
-        phone: String,
-        name: String
+        houseNumber: String = "",
+        village: String = "",
+        phone: String = "",
+        name: String = "",
+        address: String = ""
     ): MatchResult? {
         val allHouseholds = householdDao.getAll()
         val allResidents = residentDao.getAll()
@@ -80,7 +81,28 @@ class HouseholdRepository(
             targetHouseNumber = houseNumber,
             targetVillage = village,
             targetPhone = phone,
-            targetName = name
+            targetName = name,
+            targetAddress = address
+        )
+    }
+
+    suspend fun findTopMatchingHouseholds(
+        houseNumber: String = "",
+        village: String = "",
+        phone: String = "",
+        name: String = "",
+        address: String = ""
+    ): List<MatchResult> {
+        val allHouseholds = householdDao.getAll()
+        val allResidents = residentDao.getAll()
+        return HouseholdMatcher.findTopMatches(
+            households = allHouseholds,
+            residents = allResidents,
+            targetHouseNumber = houseNumber,
+            targetVillage = village,
+            targetPhone = phone,
+            targetName = name,
+            targetAddress = address
         )
     }
 }

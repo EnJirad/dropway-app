@@ -50,6 +50,10 @@ class DeliveryRepository(
 
     suspend fun getParcelByTracking(tracking: String): Parcel? = parcelDao.getByTrackingNumber(tracking)
 
+    suspend fun findRecentParcelByPhone(phone: String): Parcel? = parcelDao.getRecentParcelByPhone(phone)
+
+    suspend fun findRecentParcelByName(name: String): Parcel? = parcelDao.getRecentParcelByName(name)
+
     suspend fun isTrackingDuplicate(tracking: String): Boolean {
         val norm = TrackingUtils.normalize(tracking)
         return parcelDao.getByTrackingNumber(norm) != null

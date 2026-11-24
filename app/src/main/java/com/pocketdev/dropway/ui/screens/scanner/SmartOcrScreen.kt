@@ -70,15 +70,17 @@ fun SmartOcrScreen(
     var isParsed by remember { mutableStateOf(false) }
     var matchedResult by remember { mutableStateOf<MatchResult?>(null) }
     var duplicateWarning by remember { mutableStateOf<String?>(null) }
+    var showHouseholdSelector by remember { mutableStateOf(false) }
 
     // Auto-match household when address / phone / name updates
-    LaunchedEffect(houseNumber, villageMoo, recipientPhone, recipientName) {
-        if (houseNumber.isNotBlank() || recipientPhone.isNotBlank() || recipientName.isNotBlank()) {
+    LaunchedEffect(houseNumber, villageMoo, recipientPhone, recipientName, address) {
+        if (houseNumber.isNotBlank() || recipientPhone.isNotBlank() || recipientName.isNotBlank() || address.isNotBlank()) {
             val match = householdRepo.findMatchingHousehold(
                 houseNumber = houseNumber,
                 village = villageMoo,
                 phone = recipientPhone,
-                name = recipientName
+                name = recipientName,
+                address = address
             )
             matchedResult = match
         } else {
@@ -490,17 +492,26 @@ fun SmartOcrScreen(
                                                     color = Color(0xFF166534)
                                                 )
                                             }
-                                            Surface(
-                                                color = StatusDelivered.copy(alpha = 0.15f),
-                                                shape = RoundedCornerShape(6.dp)
-                                            ) {
-                                                Text(
-                                                    text = "ตรงกัน ${matchedResult!!.confidenceScore}%",
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFF166534),
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                )
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Surface(
+                                                    color = StatusDelivered.copy(alpha = 0.15f),
+                                                    shape = RoundedCornerShape(6.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "ตรงกัน ${matchedResult!!.confidenceScore}%",
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color(0xFF166534),
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                TextButton(
+                                                    onClick = { showHouseholdSelector = true },
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("เปลี่ยน", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = DropwayPrimary)
+                                                }
                                             }
                                         }
                                         Spacer(modifier = Modifier.height(4.dp))
@@ -520,15 +531,26 @@ fun SmartOcrScreen(
                                 ) {
                                     Row(
                                         modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
                                     ) {
-                                        Icon(painter = painterResource(id = R.drawable.ic_home), contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text(
-                                            text = "ยังไม่พบบ้านที่ตรงกันในฐานข้อมูล (จะบันทึกเป็นพัสดุใหม่)",
-                                            fontSize = 11.sp,
-                                            color = TextSecondary
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                            Icon(painter = painterResource(id = R.drawable.ic_home), contentDescription = null, tint = Color(0xFF94A3B8), modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = "ยังไม่พบบ้านที่ตรงกันในฐานข้อมูล",
+                                                fontSize = 11.sp,
+                                                color = TextSecondary
+                                            )
+                                        }
+                                        Button(
+                                            onClick = { showHouseholdSelector = true },
+                                            colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary),
+                                            shape = RoundedCornerShape(8.dp),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                        ) {
+                                            Text("เลือกบ้าน", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        }
                                     }
                                 }
                             }
@@ -539,13 +561,16 @@ fun SmartOcrScreen(
                                     val track = TrackingUtils.normalize(trackingNumber)
                                     scope.launch {
                                         val today = deliveryRepo.getOrCreateToday()
+                                        val house = matchedResult?.household
                                         val parcel = Parcel(
                                             deliveryDayId = today.id,
                                             trackingNumber = track.ifBlank { TrackingUtils.generateTracking("OCR") },
                                             recipientName = recipientName.trim().ifBlank { "ไม่ระบุชื่อ" },
                                             recipientPhone = PhoneUtils.normalize(recipientPhone),
-                                            householdId = matchedResult?.household?.id,
-                                            destinationAddress = address.trim(),
+                                            householdId = house?.id,
+                                            destinationAddress = address.trim().ifBlank { house?.fullAddress() ?: "" },
+                                            latitude = house?.latitude,
+                                            longitude = house?.longitude,
                                             codAmountSatang = MoneyUtils.parseToSatang(codAmountStr),
                                             source = "OCR",
                                             deliveryNotes = if (carrierName.isNotBlank()) "ขนส่ง: $carrierName" else ""
@@ -565,6 +590,28 @@ fun SmartOcrScreen(
                     }
                 }
             }
+        }
+
+        if (showHouseholdSelector) {
+            HouseholdSelectorDialog(
+                onHouseholdSelected = { selHouse, selRes ->
+                    matchedResult = MatchResult(
+                        household = selHouse,
+                        matchedResident = selRes,
+                        confidenceScore = 100,
+                        matchReason = "เลือกด้วยตนเองจากฐานข้อมูล"
+                    )
+                    houseNumber = selHouse.houseNumber
+                    villageMoo = selHouse.village
+                    if (address.isBlank()) address = selHouse.fullAddress()
+                    if (selRes != null) {
+                        if (recipientName.isBlank()) recipientName = selRes.fullName
+                        if (recipientPhone.isBlank()) recipientPhone = selRes.phoneNumber
+                    }
+                    showHouseholdSelector = false
+                },
+                onDismiss = { showHouseholdSelector = false }
+            )
         }
     }
 }

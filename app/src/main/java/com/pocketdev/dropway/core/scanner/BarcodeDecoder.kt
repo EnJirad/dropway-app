@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.Matrix
 import com.google.zxing.*
 import com.google.zxing.common.HybridBinarizer
+import com.pocketdev.dropway.core.util.ParsedParcelRow
+import com.pocketdev.dropway.core.util.SmartTextParser
 import com.pocketdev.dropway.core.util.TrackingUtils
 import java.util.EnumMap
 import java.util.EnumSet
@@ -13,7 +15,14 @@ data class BarcodeResult(
     val normalizedTracking: String,
     val format: BarcodeFormat,
     val carrierName: String,
-    val confidence: Int = 100
+    val confidence: Int = 100,
+    val recipientName: String = "",
+    val recipientPhone: String = "",
+    val address: String = "",
+    val houseNumber: String = "",
+    val village: String = "",
+    val codAmountSatang: Long = 0L,
+    val parsedParcel: ParsedParcelRow? = null
 )
 
 object BarcodeDecoder {
@@ -102,14 +111,33 @@ object BarcodeDecoder {
 
     private fun mapZxingResult(result: Result): BarcodeResult {
         val text = result.text.trim()
-        val normalized = TrackingUtils.normalize(text)
-        val carrier = detectCarrier(normalized)
+        val parsed = SmartTextParser.parseFreeText(text)
+
+        val tracking = if (parsed.trackingNumber.isNotBlank()) {
+            parsed.trackingNumber
+        } else {
+            TrackingUtils.normalize(text)
+        }
+
+        val carrier = if (parsed.carrier.isNotBlank()) {
+            parsed.carrier
+        } else {
+            detectCarrier(tracking)
+        }
+
         return BarcodeResult(
             rawText = text,
-            normalizedTracking = normalized,
+            normalizedTracking = tracking,
             format = result.barcodeFormat,
             carrierName = carrier,
-            confidence = 100
+            confidence = 100,
+            recipientName = parsed.recipientName,
+            recipientPhone = parsed.recipientPhone,
+            address = parsed.address,
+            houseNumber = parsed.houseNumber,
+            village = parsed.village,
+            codAmountSatang = parsed.codAmountSatang,
+            parsedParcel = if (parsed.isValid) parsed else null
         )
     }
 

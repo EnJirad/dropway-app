@@ -184,14 +184,27 @@ fun SmartImportScreen(
                                 val today = deliveryRepo.getOrCreateToday()
                                 val validRows = parsedRows.filter { it.isValid }
                                 val newParcels = validRows.map { r ->
+                                    val match = householdRepo.findMatchingHousehold(
+                                        houseNumber = r.houseNumber,
+                                        village = r.village,
+                                        phone = r.recipientPhone,
+                                        name = r.recipientName,
+                                        address = r.address
+                                    )
+                                    val house = match?.household
+                                    val resident = match?.matchedResident
                                     Parcel(
                                         deliveryDayId = today.id,
                                         trackingNumber = r.trackingNumber.ifBlank { "TEMP_${System.currentTimeMillis()}" },
-                                        recipientName = r.recipientName.ifBlank { "ไม่ระบุชื่อ" },
-                                        recipientPhone = r.recipientPhone,
-                                        destinationAddress = r.address,
+                                        recipientName = r.recipientName.ifBlank { resident?.fullName ?: "ไม่ระบุชื่อ" },
+                                        recipientPhone = r.recipientPhone.ifBlank { resident?.phoneNumber ?: "" },
+                                        householdId = house?.id,
+                                        destinationAddress = r.address.ifBlank { house?.fullAddress() ?: "" },
+                                        latitude = house?.latitude,
+                                        longitude = house?.longitude,
                                         codAmountSatang = r.codAmountSatang,
-                                        source = "IMPORT_PASTE"
+                                        source = "IMPORT_PASTE",
+                                        deliveryNotes = if (r.carrier.isNotBlank()) "ขนส่ง: ${r.carrier}" else ""
                                     )
                                 }
                                 deliveryRepo.saveParcelsBatch(newParcels)
