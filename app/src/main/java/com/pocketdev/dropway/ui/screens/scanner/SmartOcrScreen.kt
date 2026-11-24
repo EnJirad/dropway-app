@@ -32,7 +32,9 @@ import com.pocketdev.dropway.core.util.SmartTextParser
 import com.pocketdev.dropway.core.util.TrackingUtils
 import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
 import com.pocketdev.dropway.ui.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class OcrInputMode(val title: String) {
     CAMERA("กล้องถ่ายรูปฉลาก"),
@@ -88,33 +90,36 @@ fun SmartOcrScreen(
         }
     }
 
-    // Function to run the full modular label recognition pipeline
+    // Function to run the full modular label recognition pipeline in background
     fun executeRecognition(bitmap: Bitmap) {
         isProcessing = true
         capturedBitmap = bitmap
-        val result: LabelRecognitionResult = ParcelOcrEngine.processLabel(bitmap)
+        scope.launch(Dispatchers.Default) {
+            val result: LabelRecognitionResult = ParcelOcrEngine.processLabel(bitmap)
+            withContext(Dispatchers.Main) {
+                trackingNumber = result.trackingNumber
+                carrierName = result.carrierName
+                recipientName = result.recipientName
+                recipientPhone = result.recipientPhone
+                address = result.fullAddress
+                houseNumber = result.houseNumber
+                villageMoo = result.villageMoo
+                subdistrict = result.subdistrict
+                district = result.district
+                province = result.province
+                postalCode = result.postalCode
+                codAmountStr = if (result.codAmountSatang > 0) (result.codAmountSatang / 100.0).toString() else ""
+                rawOcrText = result.rawOcrText
+                detectionSource = result.detectionSource
+                isParsed = true
+                isProcessing = false
 
-        trackingNumber = result.trackingNumber
-        carrierName = result.carrierName
-        recipientName = result.recipientName
-        recipientPhone = result.recipientPhone
-        address = result.fullAddress
-        houseNumber = result.houseNumber
-        villageMoo = result.villageMoo
-        subdistrict = result.subdistrict
-        district = result.district
-        province = result.province
-        postalCode = result.postalCode
-        codAmountStr = if (result.codAmountSatang > 0) (result.codAmountSatang / 100.0).toString() else ""
-        rawOcrText = result.rawOcrText
-        detectionSource = result.detectionSource
-        isParsed = true
-        isProcessing = false
-
-        if (trackingNumber.isNotBlank()) {
-            scope.launch {
-                val isDup = deliveryRepo.isTrackingDuplicate(trackingNumber)
-                duplicateWarning = if (isDup) "เลขพัสดุนี้เคยถูกบันทึกในระบบแล้ว" else null
+                if (trackingNumber.isNotBlank()) {
+                    scope.launch {
+                        val isDup = deliveryRepo.isTrackingDuplicate(trackingNumber)
+                        duplicateWarning = if (isDup) "เลขพัสดุนี้เคยถูกบันทึกในระบบแล้ว" else null
+                    }
+                }
             }
         }
     }

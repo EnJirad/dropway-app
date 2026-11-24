@@ -51,34 +51,63 @@ object BarcodeDecoder {
         setHints(hints)
     }
 
+    private val fastReader = MultiFormatReader().apply {
+        val hints = EnumMap<DecodeHintType, Any>(DecodeHintType::class.java).apply {
+            put(DecodeHintType.POSSIBLE_FORMATS, supportedFormats)
+            put(DecodeHintType.CHARACTER_SET, "UTF-8")
+        }
+        setHints(hints)
+    }
+
+    /**
+     * Fast decoder optimized for live camera preview frames.
+     * Uses normal orientation (and 90 deg rotation fallback) without heavy TRY_HARDER.
+     */
+    fun decodeBitmapFast(bitmap: Bitmap): BarcodeResult? {
+        synchronized(fastReader) {
+            val result = decodeWithReader(bitmap, fastReader, tryInvert = false)
+            if (result != null) return result
+
+            val rot90 = rotateBitmap(bitmap, 90f)
+            val result90 = decodeWithReader(rot90, fastReader, tryInvert = false)
+            rot90.recycle()
+            return result90
+        }
+    }
+
     /**
      * Decodes 1D barcode or 2D QR code from an Android Bitmap.
      * Attempts multi-orientation rotation (0, 90, 180, 270 degrees) and inverted luminance.
      */
     fun decodeBitmap(bitmap: Bitmap): BarcodeResult? {
-        // Try original orientation
-        val result = decodeSingleBitmap(bitmap)
-        if (result != null) return result
+        synchronized(reader) {
+            // Try original orientation
+            val result = decodeWithReader(bitmap, reader, tryInvert = true)
+            if (result != null) return result
 
-        // Try 90 degree clockwise rotation
-        val rot90 = rotateBitmap(bitmap, 90f)
-        val result90 = decodeSingleBitmap(rot90)
-        if (result90 != null) return result90
+            // Try 90 degree clockwise rotation
+            val rot90 = rotateBitmap(bitmap, 90f)
+            val result90 = decodeWithReader(rot90, reader, tryInvert = true)
+            rot90.recycle()
+            if (result90 != null) return result90
 
-        // Try 180 degree rotation
-        val rot180 = rotateBitmap(bitmap, 180f)
-        val result180 = decodeSingleBitmap(rot180)
-        if (result180 != null) return result180
+            // Try 180 degree rotation
+            val rot180 = rotateBitmap(bitmap, 180f)
+            val result180 = decodeWithReader(rot180, reader, tryInvert = true)
+            rot180.recycle()
+            if (result180 != null) return result180
 
-        // Try 270 degree rotation
-        val rot270 = rotateBitmap(bitmap, 270f)
-        val result270 = decodeSingleBitmap(rot270)
-        if (result270 != null) return result270
+            // Try 270 degree rotation
+            val rot270 = rotateBitmap(bitmap, 270f)
+            val result270 = decodeWithReader(rot270, reader, tryInvert = true)
+            rot270.recycle()
+            if (result270 != null) return result270
 
-        return null
+            return null
+        }
     }
 
-    private fun decodeSingleBitmap(bitmap: Bitmap): BarcodeResult? {
+    private fun decodeWithReader(bitmap: Bitmap, r: MultiFormatReader, tryInvert: Boolean): BarcodeResult? {
         val width = bitmap.width
         val height = bitmap.height
         val pixels = IntArray(width * height)
@@ -89,21 +118,22 @@ object BarcodeDecoder {
         val binaryBitmap = BinaryBitmap(binarizer)
 
         try {
-            val zxingResult = reader.decodeWithState(binaryBitmap)
-            reader.reset()
+            val zxingResult = r.decodeWithState(binaryBitmap)
+            r.reset()
             return mapZxingResult(zxingResult)
         } catch (_: Exception) {
-            reader.reset()
+            r.reset()
         }
 
-        // Try inverted luminance (white barcode on dark background)
-        try {
-            val invertedBitmap = BinaryBitmap(HybridBinarizer(source.invert()))
-            val zxingResult = reader.decodeWithState(invertedBitmap)
-            reader.reset()
-            return mapZxingResult(zxingResult)
-        } catch (_: Exception) {
-            reader.reset()
+        if (tryInvert) {
+            try {
+                val invertedBitmap = BinaryBitmap(HybridBinarizer(source.invert()))
+                val zxingResult = r.decodeWithState(invertedBitmap)
+                r.reset()
+                return mapZxingResult(zxingResult)
+            } catch (_: Exception) {
+                r.reset()
+            }
         }
 
         return null

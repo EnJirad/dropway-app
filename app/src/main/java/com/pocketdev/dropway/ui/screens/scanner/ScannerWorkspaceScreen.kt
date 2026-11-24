@@ -40,7 +40,9 @@ import com.pocketdev.dropway.core.util.SmartTextParser
 import com.pocketdev.dropway.core.util.TrackingUtils
 import com.pocketdev.dropway.ui.components.DropwayOutlinedTextField
 import com.pocketdev.dropway.ui.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class ScanMode(val title: String, val iconRes: Int) {
     BARCODE("สแกนพัสดุ", R.drawable.ic_scan),
@@ -405,31 +407,35 @@ fun RealCameraBarcodeWorkspace(onParcelSaved: () -> Unit) {
                         resolveBarcodeAndMatch(barcode)
                     },
                     onPhotoCaptured = { bitmap ->
-                        // Run full label recognition pipeline on captured photo
-                        val recognized = ParcelOcrEngine.processLabel(bitmap)
-                        val track = recognized.trackingNumber.ifBlank {
-                            if (recognized.recipientName.isNotBlank() || recognized.fullAddress.isNotBlank()) {
-                                TrackingUtils.generateTracking("OCR")
-                            } else ""
-                        }
-                        if (track.isNotBlank() || recognized.recipientName.isNotBlank() || recognized.houseNumber.isNotBlank()) {
-                            resolveBarcodeAndMatch(
-                                BarcodeResult(
-                                    rawText = recognized.rawOcrText,
-                                    normalizedTracking = track.ifBlank { TrackingUtils.generateTracking("OCR") },
-                                    format = com.google.zxing.BarcodeFormat.QR_CODE,
-                                    carrierName = recognized.carrierName.ifBlank { "พัสดุทั่วไป" },
-                                    confidence = recognized.confidenceScore,
-                                    recipientName = recognized.recipientName,
-                                    recipientPhone = recognized.recipientPhone,
-                                    address = recognized.fullAddress,
-                                    houseNumber = recognized.houseNumber,
-                                    village = recognized.villageMoo,
-                                    codAmountSatang = recognized.codAmountSatang
-                                )
-                            )
-                        } else {
-                            duplicateWarning = "ไม่พบบาร์โค้ดหรือข้อมูลฉลากในภาพ กรุณาถ่ายใหม่อีกครั้ง"
+                        // Run full label recognition pipeline on captured photo in background thread
+                        scope.launch(Dispatchers.Default) {
+                            val recognized = ParcelOcrEngine.processLabel(bitmap)
+                            val track = recognized.trackingNumber.ifBlank {
+                                if (recognized.recipientName.isNotBlank() || recognized.fullAddress.isNotBlank()) {
+                                    TrackingUtils.generateTracking("OCR")
+                                } else ""
+                            }
+                            withContext(Dispatchers.Main) {
+                                if (track.isNotBlank() || recognized.recipientName.isNotBlank() || recognized.houseNumber.isNotBlank()) {
+                                    resolveBarcodeAndMatch(
+                                        BarcodeResult(
+                                            rawText = recognized.rawOcrText,
+                                            normalizedTracking = track.ifBlank { TrackingUtils.generateTracking("OCR") },
+                                            format = com.google.zxing.BarcodeFormat.QR_CODE,
+                                            carrierName = recognized.carrierName.ifBlank { "พัสดุทั่วไป" },
+                                            confidence = recognized.confidenceScore,
+                                            recipientName = recognized.recipientName,
+                                            recipientPhone = recognized.recipientPhone,
+                                            address = recognized.fullAddress,
+                                            houseNumber = recognized.houseNumber,
+                                            village = recognized.villageMoo,
+                                            codAmountSatang = recognized.codAmountSatang
+                                        )
+                                    )
+                                } else {
+                                    duplicateWarning = "ไม่พบบาร์โค้ดหรือข้อมูลฉลากในภาพ กรุณาถ่ายใหม่อีกครั้ง"
+                                }
+                            }
                         }
                     }
                 )

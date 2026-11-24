@@ -48,7 +48,9 @@ import com.pocketdev.dropway.core.scanner.BarcodeResult
 import com.pocketdev.dropway.core.scanner.DetectionStatus
 import com.pocketdev.dropway.core.util.AudioFeedback
 import com.pocketdev.dropway.ui.theme.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 
 @Composable
@@ -127,7 +129,6 @@ fun Camera2ScannerView(
     var textureViewRef by remember { mutableStateOf<TextureView?>(null) }
     var cameraController by remember { mutableStateOf<Camera2Controller?>(null) }
     var detectionStatus by remember { mutableStateOf(DetectionStatus.SEARCHING) }
-    var lastCooldownUntil by remember { mutableStateOf(0L) }
 
     // Live frame analysis for continuous barcode detection and auto-label detection
     LaunchedEffect(textureViewRef, isContinuousMode, enableAutoLabelDetect) {
@@ -135,29 +136,35 @@ fun Camera2ScannerView(
         var prevGray: ByteArray? = null
         var holdStart = 0L
         var stillSince = 0L
+        var lastCooldownUntil = 0L
 
         while (true) {
-            delay(if (isContinuousMode) 220L else 260L)
+            delay(if (isContinuousMode) 120L else 180L)
             try {
-                if (tv.isAvailable) {
-                    val now = System.currentTimeMillis()
-                    if (now < lastCooldownUntil) continue
+                if (!tv.isAvailable) continue
+                val now = System.currentTimeMillis()
+                if (now < lastCooldownUntil) continue
 
-                    val ratio = cameraController?.previewAspectRatio ?: (9f / 16f)
-                    val targetW = 480
-                    val targetH = (targetW / ratio).toInt().coerceIn(480, 960)
-                    val bitmap = tv.getBitmap(targetW, targetH)
-                    if (bitmap != null) {
-                        // 1. Barcode check
-                        val barcodeRes = BarcodeDecoder.decodeBitmap(bitmap)
+                val ratio = cameraController?.previewAspectRatio ?: (9f / 16f)
+                val targetW = 360
+                val targetH = (targetW / ratio).toInt().coerceIn(360, 640)
+                val bitmap = tv.getBitmap(targetW, targetH) ?: continue
+
+                // Execute all image analysis on background worker thread to keep camera preview silky smooth at 60fps
+                var detectedBarcode: BarcodeResult? = null
+                var shouldCapture = false
+                var updatedStatus: DetectionStatus? = null
+
+                withContext(Dispatchers.Default) {
+                    try {
+                        // 1. Fast barcode check without heavy multi-orientation retry
+                        val barcodeRes = BarcodeDecoder.decodeBitmapFast(bitmap)
                         if (barcodeRes != null) {
-                            AudioFeedback.beepCapture(context)
-                            onBarcodeDetected(barcodeRes)
-                            lastCooldownUntil = now + 1500L
-                            continue
+                            detectedBarcode = barcodeRes
+                            return@withContext
                         }
 
-                        // 2. Auto-label detection for single/smart mode
+                        // 2. Auto-label detection for single mode
                         if (enableAutoLabelDetect && !isContinuousMode) {
                             val cropW = (bitmap.width * 0.70f).toInt().coerceAtLeast(10)
                             val cropH = (bitmap.height * 0.70f).toInt().coerceAtLeast(10)
@@ -165,10 +172,13 @@ fun Camera2ScannerView(
                             val cropY = ((bitmap.height - cropH) / 2).coerceAtLeast(0)
                             val centerCrop = Bitmap.createBitmap(bitmap, cropX, cropY, cropW, cropH)
 
-                            val scaleW = 240
-                            val scaleH = (scaleW * (cropH.toFloat() / cropW)).toInt().coerceIn(160, 320)
+                            val scaleW = 120
+                            val scaleH = (scaleW * (cropH.toFloat() / cropW)).toInt().coerceIn(80, 200)
                             val smallBm = Bitmap.createScaledBitmap(centerCrop, scaleW, scaleH, false)
+                            centerCrop.recycle()
+
                             val analysis = AutoLabelDetector.analyzeBitmap(smallBm)
+                            smallBm.recycle()
 
                             if (analysis != null) {
                                 val isLabel = AutoLabelDetector.looksLikeLabel(analysis)
@@ -180,39 +190,57 @@ fun Camera2ScannerView(
                                 val moving = diff > 9.0
                                 prevGray = analysis.gray
 
+                                val currentTime = System.currentTimeMillis()
                                 if (!isLabel) {
                                     holdStart = 0L
                                     stillSince = 0L
-                                    val nextStatus = if (tooClose) DetectionStatus.STEP_BACK else DetectionStatus.SEARCHING
-                                    if (detectionStatus != nextStatus) detectionStatus = nextStatus
+                                    updatedStatus = if (tooClose) DetectionStatus.STEP_BACK else DetectionStatus.SEARCHING
                                 } else {
-                                    if (holdStart == 0L) holdStart = now
+                                    if (holdStart == 0L) holdStart = currentTime
                                     if (moving) {
                                         stillSince = 0L
                                     } else if (stillSince == 0L) {
-                                        stillSince = now
+                                        stillSince = currentTime
                                     }
 
-                                    val stillFor = if (stillSince > 0L) now - stillSince else 0L
-                                    if (stillFor >= AutoLabelDetector.AUTO_STILL_MS && (now - holdStart) >= AutoLabelDetector.AUTO_HOLD_MS) {
+                                    val stillFor = if (stillSince > 0L) currentTime - stillSince else 0L
+                                    if (stillFor >= AutoLabelDetector.AUTO_STILL_MS && (currentTime - holdStart) >= AutoLabelDetector.AUTO_HOLD_MS) {
                                         holdStart = 0L
                                         stillSince = 0L
-                                        detectionStatus = DetectionStatus.CAPTURING
-                                        AudioFeedback.beepCapture(context)
-
-                                        val fullBitmap = tv.bitmap
-                                        if (fullBitmap != null) {
-                                            onPhotoCaptured(fullBitmap)
-                                        }
-                                        lastCooldownUntil = now + 2000L
+                                        shouldCapture = true
+                                        updatedStatus = DetectionStatus.CAPTURING
                                     } else {
-                                        val nextStatus = if (stillFor >= AutoLabelDetector.AUTO_STILL_MS) DetectionStatus.HOLDING else DetectionStatus.SEARCHING
-                                        if (detectionStatus != nextStatus) detectionStatus = nextStatus
+                                        updatedStatus = if (stillFor >= AutoLabelDetector.AUTO_STILL_MS) DetectionStatus.HOLDING else DetectionStatus.SEARCHING
                                     }
                                 }
                             }
                         }
+                    } finally {
+                        bitmap.recycle()
                     }
+                }
+
+                // Handle results back on Main thread
+                if (detectedBarcode != null) {
+                    AudioFeedback.beepCapture(context)
+                    onBarcodeDetected(detectedBarcode!!)
+                    lastCooldownUntil = System.currentTimeMillis() + 1500L
+                    continue
+                }
+
+                if (shouldCapture) {
+                    detectionStatus = DetectionStatus.CAPTURING
+                    AudioFeedback.beepCapture(context)
+                    val fullBitmap = tv.bitmap
+                    if (fullBitmap != null) {
+                        onPhotoCaptured(fullBitmap)
+                    }
+                    lastCooldownUntil = System.currentTimeMillis() + 2000L
+                    continue
+                }
+
+                if (updatedStatus != null && detectionStatus != updatedStatus) {
+                    detectionStatus = updatedStatus!!
                 }
             } catch (_: Exception) {}
         }

@@ -47,7 +47,7 @@ object AutoLabelDetector {
             val r = (p shr 16) and 0xFF
             val g = (p shr 8) and 0xFF
             val b = p and 0xFF
-            val v = ((r * 299 + g * 587 + b * 114) / 1000).coerceIn(0, 255)
+            val v = ((r * 306 + g * 601 + b * 117) shr 10).coerceIn(0, 255)
             gray[i] = v.toByte()
             sum += v
             if (v > 170) white++
