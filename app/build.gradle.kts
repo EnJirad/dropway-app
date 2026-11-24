@@ -55,4 +55,6 @@ dependencies {
     implementation("androidx.compose.material3:material3:1.0.0")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("com.google.android.gms:play-services-maps:18.2.0")
+    implementation(files("libs/zxing-core-3.5.3.jar"))
+    testImplementation(files("libs/junit-4.13.2.jar", "libs/hamcrest-core-1.3.jar"))
 }
