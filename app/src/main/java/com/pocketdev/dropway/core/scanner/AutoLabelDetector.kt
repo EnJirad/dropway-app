@@ -30,6 +30,88 @@ object AutoLabelDetector {
     const val AUTO_HOLD_MS = 850L
     const val AUTO_STILL_MS = 450L
 
+    /**
+     * High-speed raw Y-plane frame analyzer without any Bitmap allocations.
+     * Evaluates contrast, white paper ratio, edge density, and sharpness.
+     */
+    fun analyzeYPlane(
+        yData: ByteArray,
+        width: Int,
+        height: Int,
+        cropRatio: Float = 0.70f
+    ): FrameAnalysis? {
+        if (width < 8 || height < 8) return null
+
+        val cropW = (width * cropRatio).toInt().coerceAtLeast(8)
+        val cropH = (height * cropRatio).toInt().coerceAtLeast(8)
+        val cropX = ((width - cropW) / 2).coerceAtLeast(0)
+        val cropY = ((height - cropH) / 2).coerceAtLeast(0)
+
+        val targetSamples = 120
+        val stepX = (cropW / targetSamples).coerceAtLeast(1)
+        val stepY = (cropH / targetSamples).coerceAtLeast(1)
+
+        val sampleW = (cropW + stepX - 1) / stepX
+        val sampleH = (cropH + stepY - 1) / stepY
+        val total = sampleW * sampleH
+        if (total == 0) return null
+
+        val gray = ByteArray(total)
+        var sum = 0L
+        var white = 0
+        var sampleIdx = 0
+
+        for (sy in 0 until sampleH) {
+            val y = cropY + sy * stepY
+            val rowOffset = y * width
+            for (sx in 0 until sampleW) {
+                val x = cropX + sx * stepX
+                val v = yData[rowOffset + x].toInt() and 0xFF
+                gray[sampleIdx++] = v.toByte()
+                sum += v
+                if (v > 170) white++
+            }
+        }
+
+        val mean = sum.toDouble() / total
+
+        var variance = 0.0
+        for (i in 0 until total) {
+            val v = gray[i].toInt() and 0xFF
+            val d = v - mean
+            variance += d * d
+        }
+        val std = sqrt(variance / total)
+
+        var edges = 0
+        var compared = 0
+        var gradientSum = 0L
+
+        for (sy in 1 until sampleH - 1) {
+            for (sx in 1 until sampleW - 1) {
+                val i = sy * sampleW + sx
+                val v = gray[i].toInt() and 0xFF
+                val vRight = gray[i + 1].toInt() and 0xFF
+                val vDown = gray[i + sampleW].toInt() and 0xFF
+                val gx = abs(v - vRight)
+                val gy = abs(v - vDown)
+                val gTotal = gx + gy
+                gradientSum += gTotal
+                if (gTotal > 40) edges++
+                compared++
+            }
+        }
+
+        return FrameAnalysis(
+            gray = gray,
+            mean = mean,
+            std = std,
+            whiteRatio = white.toDouble() / total,
+            edgeRatio = if (compared > 0) edges.toDouble() / compared else 0.0,
+            sharpness = if (compared > 0) gradientSum.toDouble() / compared else 0.0
+        )
+    }
+
     fun analyzeBitmap(bitmap: Bitmap): FrameAnalysis? {
         val width = bitmap.width
         val height = bitmap.height

@@ -329,8 +329,8 @@ fun TodayDeliveriesScreen(
                         val grouped = filteredParcels.groupBy {
                             if (it.householdId != null) "H_${it.householdId}" else it.destinationAddress.ifBlank { "NO_ADDR" }
                         }
-                        grouped.forEach { (_, groupParcels) ->
-                            item {
+                        grouped.forEach { (groupKey, groupParcels) ->
+                            item(key = groupKey) {
                                 HouseholdParcelGroupCard(
                                     parcels = groupParcels,
                                     onParcelClick = { selectedParcelForDetail = it },

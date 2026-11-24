@@ -87,10 +87,16 @@ fun HouseholdListScreen(
         }
     }
 
-    LaunchedEffect(searchQuery, selectedVillageFilter) {
-        households = repository.searchHouseholds(searchQuery, selectedVillageFilter)
+    LaunchedEffect(Unit) {
         totalCount = repository.getCount()
         distinctVillages = repository.getDistinctVillages()
+    }
+
+    LaunchedEffect(searchQuery, selectedVillageFilter) {
+        if (searchQuery.isNotBlank()) {
+            kotlinx.coroutines.delay(180L)
+        }
+        households = repository.searchHouseholds(searchQuery, selectedVillageFilter)
     }
 
     val villages = remember(distinctVillages) {

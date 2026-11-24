@@ -5,17 +5,21 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Matrix
-import android.graphics.RectF
-import android.graphics.SurfaceTexture
-import android.hardware.camera2.*
 import android.os.Handler
-import android.os.HandlerThread
+import android.os.Looper
 import android.util.Size
-import android.view.Surface
-import android.view.TextureView
-import android.view.WindowManager
+import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.camera.core.Camera
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -35,6 +39,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -48,10 +53,7 @@ import com.pocketdev.dropway.core.scanner.BarcodeResult
 import com.pocketdev.dropway.core.scanner.DetectionStatus
 import com.pocketdev.dropway.core.util.AudioFeedback
 import com.pocketdev.dropway.ui.theme.*
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.withContext
-import kotlin.math.abs
+import java.util.concurrent.Executors
 
 @Composable
 fun Camera2ScannerView(
@@ -63,6 +65,9 @@ fun Camera2ScannerView(
     overlayGuideText: String = "วางบาร์โค้ดหรือฉลากพัสดุให้อยู่ในกรอบ"
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+
     var hasCameraPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
@@ -126,124 +131,45 @@ fun Camera2ScannerView(
     }
 
     var isFlashOn by remember { mutableStateOf(false) }
-    var textureViewRef by remember { mutableStateOf<TextureView?>(null) }
-    var cameraController by remember { mutableStateOf<Camera2Controller?>(null) }
+    var activeCamera by remember { mutableStateOf<Camera?>(null) }
+    var activeImageCapture by remember { mutableStateOf<ImageCapture?>(null) }
     var detectionStatus by remember { mutableStateOf(DetectionStatus.SEARCHING) }
 
-    // Live frame analysis for continuous barcode detection and auto-label detection
-    LaunchedEffect(textureViewRef, isContinuousMode, enableAutoLabelDetect) {
-        val tv = textureViewRef ?: return@LaunchedEffect
-        var prevGray: ByteArray? = null
-        var holdStart = 0L
-        var stillSince = 0L
-        var lastCooldownUntil = 0L
+    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+    val captureExecutor = remember { Executors.newSingleThreadExecutor() }
 
-        while (true) {
-            delay(if (isContinuousMode) 120L else 180L)
-            try {
-                if (!tv.isAvailable) continue
-                val now = System.currentTimeMillis()
-                if (now < lastCooldownUntil) continue
-
-                val ratio = cameraController?.previewAspectRatio ?: (9f / 16f)
-                val targetW = 360
-                val targetH = (targetW / ratio).toInt().coerceIn(360, 640)
-                val bitmap = tv.getBitmap(targetW, targetH) ?: continue
-
-                // Execute all image analysis on background worker thread to keep camera preview silky smooth at 60fps
-                var detectedBarcode: BarcodeResult? = null
-                var shouldCapture = false
-                var updatedStatus: DetectionStatus? = null
-
-                withContext(Dispatchers.Default) {
+    fun capturePhoto() {
+        val capture = activeImageCapture ?: return
+        capture.takePicture(
+            captureExecutor,
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(imageProxy: ImageProxy) {
                     try {
-                        // 1. Fast barcode check without heavy multi-orientation retry
-                        val barcodeRes = BarcodeDecoder.decodeBitmapFast(bitmap)
-                        if (barcodeRes != null) {
-                            detectedBarcode = barcodeRes
-                            return@withContext
-                        }
-
-                        // 2. Auto-label detection for single mode
-                        if (enableAutoLabelDetect && !isContinuousMode) {
-                            val cropW = (bitmap.width * 0.70f).toInt().coerceAtLeast(10)
-                            val cropH = (bitmap.height * 0.70f).toInt().coerceAtLeast(10)
-                            val cropX = ((bitmap.width - cropW) / 2).coerceAtLeast(0)
-                            val cropY = ((bitmap.height - cropH) / 2).coerceAtLeast(0)
-                            val centerCrop = Bitmap.createBitmap(bitmap, cropX, cropY, cropW, cropH)
-
-                            val scaleW = 120
-                            val scaleH = (scaleW * (cropH.toFloat() / cropW)).toInt().coerceIn(80, 200)
-                            val smallBm = Bitmap.createScaledBitmap(centerCrop, scaleW, scaleH, false)
-                            centerCrop.recycle()
-
-                            val analysis = AutoLabelDetector.analyzeBitmap(smallBm)
-                            smallBm.recycle()
-
-                            if (analysis != null) {
-                                val isLabel = AutoLabelDetector.looksLikeLabel(analysis)
-                                val tooClose = !isLabel && AutoLabelDetector.looksTooClose(analysis)
-
-                                val diff = if (prevGray != null) {
-                                    AutoLabelDetector.frameDifference(prevGray!!, analysis.gray)
-                                } else 999.0
-                                val moving = diff > 9.0
-                                prevGray = analysis.gray
-
-                                val currentTime = System.currentTimeMillis()
-                                if (!isLabel) {
-                                    holdStart = 0L
-                                    stillSince = 0L
-                                    updatedStatus = if (tooClose) DetectionStatus.STEP_BACK else DetectionStatus.SEARCHING
-                                } else {
-                                    if (holdStart == 0L) holdStart = currentTime
-                                    if (moving) {
-                                        stillSince = 0L
-                                    } else if (stillSince == 0L) {
-                                        stillSince = currentTime
-                                    }
-
-                                    val stillFor = if (stillSince > 0L) currentTime - stillSince else 0L
-                                    if (stillFor >= AutoLabelDetector.AUTO_STILL_MS && (currentTime - holdStart) >= AutoLabelDetector.AUTO_HOLD_MS) {
-                                        holdStart = 0L
-                                        stillSince = 0L
-                                        shouldCapture = true
-                                        updatedStatus = DetectionStatus.CAPTURING
-                                    } else {
-                                        updatedStatus = if (stillFor >= AutoLabelDetector.AUTO_STILL_MS) DetectionStatus.HOLDING else DetectionStatus.SEARCHING
-                                    }
-                                }
+                        val rotation = imageProxy.imageInfo.rotationDegrees
+                        val rawBitmap = imageProxy.toBitmap()
+                        val finalBitmap = if (rotation != 0) {
+                            val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
+                            val rotated = Bitmap.createBitmap(rawBitmap, 0, 0, rawBitmap.width, rawBitmap.height, matrix, true)
+                            if (rotated != rawBitmap) {
+                                rawBitmap.recycle()
                             }
+                            rotated
+                        } else {
+                            rawBitmap
                         }
+                        mainHandler.post {
+                            onPhotoCaptured(finalBitmap)
+                        }
+                    } catch (_: Exception) {
                     } finally {
-                        bitmap.recycle()
+                        imageProxy.close()
                     }
                 }
 
-                // Handle results back on Main thread
-                if (detectedBarcode != null) {
-                    AudioFeedback.beepCapture(context)
-                    onBarcodeDetected(detectedBarcode!!)
-                    lastCooldownUntil = System.currentTimeMillis() + 1500L
-                    continue
+                override fun onError(exception: ImageCaptureException) {
                 }
-
-                if (shouldCapture) {
-                    detectionStatus = DetectionStatus.CAPTURING
-                    AudioFeedback.beepCapture(context)
-                    val fullBitmap = tv.bitmap
-                    if (fullBitmap != null) {
-                        onPhotoCaptured(fullBitmap)
-                    }
-                    lastCooldownUntil = System.currentTimeMillis() + 2000L
-                    continue
-                }
-
-                if (updatedStatus != null && detectionStatus != updatedStatus) {
-                    detectionStatus = updatedStatus!!
-                }
-            } catch (_: Exception) {}
-        }
+            }
+        )
     }
 
     Box(
@@ -254,19 +180,131 @@ fun Camera2ScannerView(
     ) {
         AndroidView(
             factory = { ctx ->
-                TextureView(ctx).apply {
-                    textureViewRef = this
-                    val controller = Camera2Controller(ctx, this)
-                    cameraController = controller
-                    surfaceTextureListener = controller
-                    addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
-                        val w = right - left
-                        val h = bottom - top
-                        if (w > 0 && h > 0) {
-                            controller.configureTransform(w, h)
+                val previewView = PreviewView(ctx).apply {
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                    scaleType = PreviewView.ScaleType.FILL_CENTER
+                    implementationMode = PreviewView.ImplementationMode.PERFORMANCE
+                }
+
+                val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                cameraProviderFuture.addListener({
+                    val cameraProvider = cameraProviderFuture.get()
+
+                    val preview = Preview.Builder().build().also {
+                        it.setSurfaceProvider(previewView.surfaceProvider)
+                    }
+
+                    val imageCapture = ImageCapture.Builder()
+                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                        .build()
+                    activeImageCapture = imageCapture
+
+                    var prevGray: ByteArray? = null
+                    var holdStart = 0L
+                    var stillSince = 0L
+                    var cooldownUntil = 0L
+
+                    val imageAnalysis = ImageAnalysis.Builder()
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .setTargetResolution(Size(1280, 720))
+                        .build()
+
+                    imageAnalysis.setAnalyzer(analysisExecutor) { imageProxy ->
+                        val now = System.currentTimeMillis()
+                        if (now < cooldownUntil) {
+                            imageProxy.close()
+                            return@setAnalyzer
+                        }
+
+                        try {
+                            // 1. Direct zero-copy barcode analysis on raw Y plane
+                            val barcodeResult = BarcodeDecoder.decodeImageProxy(imageProxy)
+                            if (barcodeResult != null) {
+                                cooldownUntil = now + 1500L
+                                mainHandler.post {
+                                    AudioFeedback.beepCapture(ctx)
+                                    onBarcodeDetected(barcodeResult)
+                                }
+                                return@setAnalyzer
+                            }
+
+                            // 2. Auto-label detection for single mode
+                            if (enableAutoLabelDetect && !isContinuousMode) {
+                                val yBytes = BarcodeDecoder.extractYBytes(imageProxy)
+                                val rotation = imageProxy.imageInfo.rotationDegrees
+                                val rotatedY = BarcodeDecoder.rotateY(yBytes, imageProxy.width, imageProxy.height, rotation)
+                                val finalW = if (rotation == 90 || rotation == 270) imageProxy.height else imageProxy.width
+                                val finalH = if (rotation == 90 || rotation == 270) imageProxy.width else imageProxy.height
+
+                                val analysis = AutoLabelDetector.analyzeYPlane(rotatedY, finalW, finalH)
+                                if (analysis != null) {
+                                    val isLabel = AutoLabelDetector.looksLikeLabel(analysis)
+                                    val tooClose = !isLabel && AutoLabelDetector.looksTooClose(analysis)
+                                    val diff = if (prevGray != null) {
+                                        AutoLabelDetector.frameDifference(prevGray!!, analysis.gray)
+                                    } else 999.0
+                                    val moving = diff > 9.0
+                                    prevGray = analysis.gray
+
+                                    val currentTime = System.currentTimeMillis()
+                                    if (!isLabel) {
+                                        holdStart = 0L
+                                        stillSince = 0L
+                                        val nextStatus = if (tooClose) DetectionStatus.STEP_BACK else DetectionStatus.SEARCHING
+                                        if (detectionStatus != nextStatus) {
+                                            mainHandler.post { detectionStatus = nextStatus }
+                                        }
+                                    } else {
+                                        if (holdStart == 0L) holdStart = currentTime
+                                        if (moving) {
+                                            stillSince = 0L
+                                        } else if (stillSince == 0L) {
+                                            stillSince = currentTime
+                                        }
+
+                                        val stillFor = if (stillSince > 0L) currentTime - stillSince else 0L
+                                        if (stillFor >= AutoLabelDetector.AUTO_STILL_MS && (currentTime - holdStart) >= AutoLabelDetector.AUTO_HOLD_MS) {
+                                            holdStart = 0L
+                                            stillSince = 0L
+                                            cooldownUntil = currentTime + 2500L
+                                            mainHandler.post {
+                                                detectionStatus = DetectionStatus.CAPTURING
+                                                AudioFeedback.beepCapture(ctx)
+                                                capturePhoto()
+                                            }
+                                        } else {
+                                            val nextStatus = if (stillFor >= AutoLabelDetector.AUTO_STILL_MS) DetectionStatus.HOLDING else DetectionStatus.SEARCHING
+                                            if (detectionStatus != nextStatus) {
+                                                mainHandler.post { detectionStatus = nextStatus }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (_: Exception) {
+                        } finally {
+                            imageProxy.close()
                         }
                     }
-                }
+
+                    try {
+                        cameraProvider.unbindAll()
+                        val camera = cameraProvider.bindToLifecycle(
+                            lifecycleOwner,
+                            CameraSelector.DEFAULT_BACK_CAMERA,
+                            preview,
+                            imageAnalysis,
+                            imageCapture
+                        )
+                        activeCamera = camera
+                    } catch (_: Exception) {
+                    }
+                }, ContextCompat.getMainExecutor(ctx))
+
+                previewView
             },
             modifier = Modifier.fillMaxSize()
         )
@@ -323,7 +361,7 @@ fun Camera2ScannerView(
                 onClick = {
                     val next = !isFlashOn
                     isFlashOn = next
-                    cameraController?.setTorchMode(next)
+                    activeCamera?.cameraControl?.enableTorch(next)
                 },
                 modifier = Modifier
                     .clip(CircleShape)
@@ -354,14 +392,8 @@ fun Camera2ScannerView(
                     .border(4.dp, Color.White, CircleShape)
                     .background(Color.White.copy(alpha = 0.2f))
                     .clickable {
-                        val tv = textureViewRef
-                        if (tv != null && tv.isAvailable) {
-                            val captured = tv.bitmap
-                            if (captured != null) {
-                                AudioFeedback.beepCapture(context)
-                                onPhotoCaptured(captured)
-                            }
-                        }
+                        AudioFeedback.beepCapture(context)
+                        capturePhoto()
                     },
                 contentAlignment = Alignment.Center
             ) {
@@ -377,7 +409,8 @@ fun Camera2ScannerView(
 
     DisposableEffect(Unit) {
         onDispose {
-            cameraController?.release()
+            analysisExecutor.shutdown()
+            captureExecutor.shutdown()
         }
     }
 }
@@ -467,192 +500,5 @@ fun ScannerReticleOverlay(
                 .background(Color(0x99000000), shape = RoundedCornerShape(8.dp))
                 .padding(horizontal = 14.dp, vertical = 6.dp)
         )
-    }
-}
-
-class Camera2Controller(
-    private val context: Context,
-    private val textureView: TextureView
-) : TextureView.SurfaceTextureListener {
-
-    private val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-    private var cameraDevice: CameraDevice? = null
-    private var captureSession: CameraCaptureSession? = null
-    private var backgroundThread: HandlerThread? = null
-    private var backgroundHandler: Handler? = null
-
-    var previewAspectRatio: Float = 9f / 16f
-        private set
-
-    private var cameraId: String? = null
-    private var previewSize: Size? = null
-    private var isTorchEnabled: Boolean = false
-
-    override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-        startBackgroundThread()
-        openCamera(width, height)
-    }
-
-    override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-        configureTransform(width, height)
-    }
-
-    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-        stopCamera()
-        stopBackgroundThread()
-        return true
-    }
-
-    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {}
-
-    private fun startBackgroundThread() {
-        if (backgroundThread == null) {
-            backgroundThread = HandlerThread("Camera2Background").apply { start() }
-            backgroundHandler = Handler(backgroundThread!!.looper)
-        }
-    }
-
-    private fun stopBackgroundThread() {
-        backgroundThread?.quitSafely()
-        try {
-            backgroundThread?.join()
-            backgroundThread = null
-            backgroundHandler = null
-        } catch (_: Exception) {}
-    }
-
-    private fun openCamera(viewWidth: Int, viewHeight: Int) {
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
-            return
-        }
-
-        try {
-            for (id in cameraManager.cameraIdList) {
-                val characteristics = cameraManager.getCameraCharacteristics(id)
-                val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
-                if (facing == CameraCharacteristics.LENS_FACING_BACK) {
-                    cameraId = id
-                    val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
-                    val choices = map?.getOutputSizes(SurfaceTexture::class.java)
-                    if (!choices.isNullOrEmpty()) {
-                        previewSize = choices.firstOrNull { it.width in 1280..1920 && it.height in 720..1080 }
-                            ?: choices.first()
-                        previewAspectRatio = previewSize!!.height.toFloat() / previewSize!!.width.toFloat()
-                    }
-                    break
-                }
-            }
-
-            val targetId = cameraId ?: return
-            cameraManager.openCamera(targetId, object : CameraDevice.StateCallback() {
-                override fun onOpened(camera: CameraDevice) {
-                    cameraDevice = camera
-                    startPreview()
-                }
-
-                override fun onDisconnected(camera: CameraDevice) {
-                    camera.close()
-                    cameraDevice = null
-                }
-
-                override fun onError(camera: CameraDevice, error: Int) {
-                    camera.close()
-                    cameraDevice = null
-                }
-            }, backgroundHandler)
-        } catch (_: Exception) {}
-    }
-
-    fun configureTransform(viewWidth: Int, viewHeight: Int) {
-        val size = previewSize ?: return
-        val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        val rotation = windowManager.defaultDisplay.rotation
-        val matrix = Matrix()
-        val viewRect = RectF(0f, 0f, viewWidth.toFloat(), viewHeight.toFloat())
-        val bufferRect = RectF(0f, 0f, size.height.toFloat(), size.width.toFloat())
-        val centerX = viewRect.centerX()
-        val centerY = viewRect.centerY()
-
-        if (Surface.ROTATION_90 == rotation || Surface.ROTATION_270 == rotation) {
-            bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
-            matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL)
-            val scale = maxOf(
-                viewHeight.toFloat() / size.height,
-                viewWidth.toFloat() / size.width
-            )
-            matrix.postScale(scale, scale, centerX, centerY)
-            matrix.postRotate((90 * (rotation - 2)).toFloat(), centerX, centerY)
-        } else if (Surface.ROTATION_180 == rotation) {
-            matrix.postRotate(180f, centerX, centerY)
-        }
-        textureView.setTransform(matrix)
-    }
-
-    private fun startPreview() {
-        val device = cameraDevice ?: return
-        val size = previewSize ?: return
-        val texture = textureView.surfaceTexture ?: return
-        texture.setDefaultBufferSize(size.width, size.height)
-        val surface = Surface(texture)
-
-        try {
-            val previewRequestBuilder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(surface)
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                if (isTorchEnabled) {
-                    set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
-                }
-            }
-
-            @Suppress("DEPRECATION")
-            device.createCaptureSession(listOf(surface), object : CameraCaptureSession.StateCallback() {
-                override fun onConfigured(session: CameraCaptureSession) {
-                    captureSession = session
-                    try {
-                        session.setRepeatingRequest(previewRequestBuilder.build(), null, backgroundHandler)
-                    } catch (_: Exception) {}
-                }
-
-                override fun onConfigureFailed(session: CameraCaptureSession) {}
-            }, backgroundHandler)
-        } catch (_: Exception) {}
-    }
-
-    fun setTorchMode(enabled: Boolean) {
-        isTorchEnabled = enabled
-        try {
-            val device = cameraDevice ?: return
-            val session = captureSession ?: return
-            val texture = textureView.surfaceTexture ?: return
-            val size = previewSize ?: return
-            texture.setDefaultBufferSize(size.width, size.height)
-            val surface = Surface(texture)
-
-            val request = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(surface)
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                if (enabled) {
-                    set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_TORCH)
-                } else {
-                    set(CaptureRequest.FLASH_MODE, CaptureRequest.FLASH_MODE_OFF)
-                }
-            }.build()
-
-            session.setRepeatingRequest(request, null, backgroundHandler)
-        } catch (_: Exception) {}
-    }
-
-    fun release() {
-        stopCamera()
-        stopBackgroundThread()
-    }
-
-    private fun stopCamera() {
-        try {
-            captureSession?.close()
-            captureSession = null
-            cameraDevice?.close()
-            cameraDevice = null
-        } catch (_: Exception) {}
     }
 }

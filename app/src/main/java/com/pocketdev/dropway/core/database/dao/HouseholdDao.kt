@@ -99,9 +99,14 @@ class HouseholdDao(private val dbHelper: DropwayDatabaseHelper) {
         rows > 0
     }
 
-    suspend fun getAll(): List<Household> = withContext(Dispatchers.IO) {
+    suspend fun getAll(limit: Int = -1): List<Household> = withContext(Dispatchers.IO) {
         val list = mutableListOf<Household>()
-        readableDb.rawQuery("SELECT * FROM households ORDER BY house_number ASC, village ASC", null).use { cursor ->
+        val sql = if (limit > 0) {
+            "SELECT * FROM households ORDER BY house_number ASC, village ASC LIMIT $limit"
+        } else {
+            "SELECT * FROM households ORDER BY house_number ASC, village ASC"
+        }
+        readableDb.rawQuery(sql, null).use { cursor ->
             while (cursor.moveToNext()) {
                 list.add(mapCursorToHousehold(cursor))
             }
@@ -116,7 +121,7 @@ class HouseholdDao(private val dbHelper: DropwayDatabaseHelper) {
         val args: Array<String>
 
         if (cleanQuery.isBlank() && villageFilter.isBlank()) {
-            return@withContext getAll()
+            return@withContext getAll(limit = 200)
         }
 
         val like = "%$cleanQuery%"
@@ -133,6 +138,7 @@ class HouseholdDao(private val dbHelper: DropwayDatabaseHelper) {
                     r.phone_number LIKE ?
                 )
                 ORDER BY h.house_number ASC
+                LIMIT 150
             """.trimIndent()
             args = arrayOf(villageFilter, like, like, like, like, like, like)
         } else {
@@ -148,6 +154,7 @@ class HouseholdDao(private val dbHelper: DropwayDatabaseHelper) {
                     r.full_name LIKE ? OR
                     r.phone_number LIKE ?
                 ORDER BY h.house_number ASC, h.village ASC
+                LIMIT 150
             """.trimIndent()
             args = arrayOf(like, like, like, like, like, like, like)
         }

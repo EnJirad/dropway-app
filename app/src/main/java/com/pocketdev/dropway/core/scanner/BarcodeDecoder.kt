@@ -2,6 +2,7 @@ package com.pocketdev.dropway.core.scanner
 
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import androidx.camera.core.ImageProxy
 import com.google.zxing.*
 import com.google.zxing.common.HybridBinarizer
 import com.pocketdev.dropway.core.util.ParsedParcelRow
@@ -57,6 +58,150 @@ object BarcodeDecoder {
             put(DecodeHintType.CHARACTER_SET, "UTF-8")
         }
         setHints(hints)
+    }
+
+    /**
+     * Extracts raw Y-plane bytes from CameraX ImageProxy, properly handling rowStride and padding.
+     */
+    fun extractYBytes(image: ImageProxy): ByteArray {
+        val plane = image.planes[0]
+        val buffer = plane.buffer
+        buffer.rewind()
+        val width = image.width
+        val height = image.height
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
+
+        if (rowStride == width && pixelStride == 1) {
+            val bytes = ByteArray(buffer.remaining())
+            buffer.get(bytes)
+            return bytes
+        }
+
+        val bytes = ByteArray(width * height)
+        var outOffset = 0
+        for (row in 0 until height) {
+            buffer.position(row * rowStride)
+            if (pixelStride == 1) {
+                buffer.get(bytes, outOffset, width)
+                outOffset += width
+            } else {
+                for (col in 0 until width) {
+                    bytes[outOffset++] = buffer.get(row * rowStride + col * pixelStride)
+                }
+            }
+        }
+        return bytes
+    }
+
+    /**
+     * Rotates raw grayscale byte array by the given rotation degrees (0, 90, 180, 270).
+     */
+    fun rotateY(src: ByteArray, w: Int, h: Int, rotationDegrees: Int): ByteArray {
+        return when (rotationDegrees) {
+            90 -> {
+                val rotated = ByteArray(w * h)
+                var i = 0
+                for (x in 0 until w) {
+                    for (y in h - 1 downTo 0) {
+                        rotated[i++] = src[y * w + x]
+                    }
+                }
+                rotated
+            }
+            180 -> {
+                val rotated = ByteArray(w * h)
+                val total = w * h
+                for (i in 0 until total) {
+                    rotated[i] = src[total - 1 - i]
+                }
+                rotated
+            }
+            270 -> {
+                val rotated = ByteArray(w * h)
+                var i = 0
+                for (x in w - 1 downTo 0) {
+                    for (y in 0 until h) {
+                        rotated[i++] = src[y * w + x]
+                    }
+                }
+                rotated
+            }
+            else -> src
+        }
+    }
+
+    /**
+     * High-performance barcode decoder directly operating on CameraX ImageProxy.
+     * Decodes Y-plane without converting to Bitmap or ARGB.
+     */
+    fun decodeImageProxy(image: ImageProxy): BarcodeResult? {
+        val yBytes = extractYBytes(image)
+        val rotation = image.imageInfo.rotationDegrees
+        val rotated = rotateY(yBytes, image.width, image.height, rotation)
+        val finalW = if (rotation == 90 || rotation == 270) image.height else image.width
+        val finalH = if (rotation == 90 || rotation == 270) image.width else image.height
+        return decodeYBytes(rotated, finalW, finalH)
+    }
+
+    /**
+     * Decodes 1D/2D barcodes directly from raw Y-plane bytes.
+     * Checks center reticle region first for optimal speed, then full frame fallback.
+     */
+    fun decodeYBytes(
+        yBytes: ByteArray,
+        width: Int,
+        height: Int,
+        cropRatio: Float = 0.82f
+    ): BarcodeResult? {
+        synchronized(fastReader) {
+            val cropW = (width * cropRatio).toInt().coerceAtLeast(1)
+            val cropH = (height * cropRatio).toInt().coerceAtLeast(1)
+            val left = ((width - cropW) / 2).coerceAtLeast(0)
+            val top = ((height - cropH) / 2).coerceAtLeast(0)
+
+            // 1. Center reticle region
+            try {
+                val source = PlanarYUVLuminanceSource(
+                    yBytes,
+                    width,
+                    height,
+                    left,
+                    top,
+                    cropW,
+                    cropH,
+                    false
+                )
+                val binaryBitmap = BinaryBitmap(HybridBinarizer(source))
+                val result = fastReader.decodeWithState(binaryBitmap)
+                fastReader.reset()
+                return mapZxingResult(result)
+            } catch (_: Exception) {
+                fastReader.reset()
+            }
+
+            // 2. Full frame fallback
+            try {
+                val fullSource = PlanarYUVLuminanceSource(
+                    yBytes,
+                    width,
+                    height,
+                    0,
+                    0,
+                    width,
+                    height,
+                    false
+                )
+                val fullBinary = BinaryBitmap(HybridBinarizer(fullSource))
+                val result = fastReader.decodeWithState(fullBinary)
+                fastReader.reset()
+                return mapZxingResult(result)
+            } catch (_: Exception) {
+                fastReader.reset()
+            }
+
+            return null
+        }
     }
 
     /**
