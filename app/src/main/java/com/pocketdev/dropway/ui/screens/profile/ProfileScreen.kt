@@ -103,6 +103,73 @@ fun ProfileScreen(
 
             Spacer(modifier = Modifier.height(14.dp))
 
+            // Master Household Database Card
+            var householdCount by remember { mutableStateOf(0) }
+            var isSyncingCsv by remember { mutableStateOf(false) }
+
+            LaunchedEffect(Unit) {
+                householdCount = householdRepo.getCount()
+            }
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = Color.White,
+                shadowElevation = 2.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("ฐานข้อมูลบ้าน (.ai/all_home.csv)", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                        Surface(
+                            color = DropwayPrimary.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "$householdCount หลัง",
+                                color = DropwayPrimary,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "ข้อมูลบ้านและลูกบ้าน 4,500+ รายการจากไฟล์ CSV พร้อมพิกัด GPS และโน้ตการนำทาง",
+                        fontSize = 12.sp,
+                        color = TextSecondary
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = {
+                            scope.launch {
+                                isSyncingCsv = true
+                                val res = householdRepo.importFromCsv(context, clearExisting = true)
+                                isSyncingCsv = false
+                                householdCount = householdRepo.getCount()
+                                Toast.makeText(context, "ซิงค์สำเร็จ ${res.householdsCreated} หลังคาเรือน (${res.residentsCreated} รายชื่อ)", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (isSyncingCsv) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = DropwayPrimary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("กำลังนำเข้าข้อมูล...")
+                        } else {
+                            Text("ซิงค์ข้อมูลบ้านใหม่จาก CSV (Reload Master Data)")
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
             // Data Safety & Export
             Surface(
                 shape = RoundedCornerShape(14.dp),

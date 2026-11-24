@@ -76,6 +76,29 @@ class HouseholdDao(private val dbHelper: DropwayDatabaseHelper) {
         }
     }
 
+    suspend fun getCount(): Int = withContext(Dispatchers.IO) {
+        readableDb.rawQuery("SELECT COUNT(*) FROM households", null).use { cursor ->
+            if (cursor.moveToFirst()) cursor.getInt(0) else 0
+        }
+    }
+
+    suspend fun getDistinctVillages(): List<String> = withContext(Dispatchers.IO) {
+        val list = mutableListOf<String>()
+        readableDb.rawQuery("SELECT DISTINCT village FROM households WHERE village != '' ORDER BY CAST(village AS INTEGER) ASC, village ASC", null).use { cursor ->
+            while (cursor.moveToNext()) {
+                list.add(cursor.getString(0))
+            }
+        }
+        list
+    }
+
+    suspend fun deleteAll(): Boolean = withContext(Dispatchers.IO) {
+        writableDb.delete("residents", null, null)
+        val rows = writableDb.delete("households", null, null)
+        DatabaseChangeNotifier.notifyChanged("households", "residents")
+        rows > 0
+    }
+
     suspend fun getAll(): List<Household> = withContext(Dispatchers.IO) {
         val list = mutableListOf<Household>()
         readableDb.rawQuery("SELECT * FROM households ORDER BY house_number ASC, village ASC", null).use { cursor ->

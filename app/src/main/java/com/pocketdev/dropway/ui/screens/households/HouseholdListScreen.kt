@@ -3,9 +3,11 @@ package com.pocketdev.dropway.ui.screens.households
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -38,16 +40,21 @@ fun HouseholdListScreen(
     var searchQuery by remember { mutableStateOf("") }
     var selectedVillageFilter by remember { mutableStateOf("") }
     var households by remember { mutableStateOf<List<Household>>(emptyList()) }
+    var totalCount by remember { mutableStateOf(0) }
+    var distinctVillages by remember { mutableStateOf<List<String>>(emptyList()) }
+    var isImporting by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
     var editingHousehold by remember { mutableStateOf<Household?>(null) }
     var quickAddHousehold by remember { mutableStateOf<Household?>(null) }
 
     LaunchedEffect(searchQuery, selectedVillageFilter) {
         households = repository.searchHouseholds(searchQuery, selectedVillageFilter)
+        totalCount = repository.getCount()
+        distinctVillages = repository.getDistinctVillages()
     }
 
-    val villages = remember(households) {
-        households.map { it.village.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+    val villages = remember(distinctVillages) {
+        distinctVillages
     }
 
     Scaffold(
@@ -88,6 +95,38 @@ fun HouseholdListScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
+                    // Header Status & Sync Button
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "ฐานข้อมูลลูกบ้าน ($totalCount หลังคาเรือน)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                            color = DropwayPrimary
+                        )
+                        TextButton(
+                            onClick = {
+                                scope.launch {
+                                    isImporting = true
+                                    val res = repository.importFromCsv(context, clearExisting = true)
+                                    isImporting = false
+                                    households = repository.searchHouseholds(searchQuery, selectedVillageFilter)
+                                    totalCount = repository.getCount()
+                                    distinctVillages = repository.getDistinctVillages()
+                                    Toast.makeText(context, "นำเข้าสำเร็จ ${res.householdsCreated} หลังคาเรือน (${res.residentsCreated} รายชื่อ)", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Icon(painter = painterResource(id = R.drawable.ic_refresh), contentDescription = null, modifier = Modifier.size(13.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(if (isImporting) "กำลังนำเข้า..." else "ซิงค์ CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+
                     DropwayOutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
@@ -117,19 +156,21 @@ fun HouseholdListScreen(
                         shape = RoundedCornerShape(12.dp)
                     )
 
-                    // Village Filter Chips
+                    // Village Filter Chips with Horizontal Scroll
                     if (villages.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             FilterChip(
                                 selected = selectedVillageFilter.isEmpty(),
                                 onClick = { selectedVillageFilter = "" },
-                                label = { Text("ทั้งหมด (${households.size})") }
+                                label = { Text("ทั้งหมด ($totalCount)") }
                             )
-                            villages.take(5).forEach { v ->
+                            villages.forEach { v ->
                                 FilterChip(
                                     selected = selectedVillageFilter == v,
                                     onClick = {
@@ -149,7 +190,7 @@ fun HouseholdListScreen(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
                         Icon(
                             painter = painterResource(id = R.drawable.ic_home),
                             contentDescription = null,
@@ -165,10 +206,39 @@ fun HouseholdListScreen(
                         )
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "กดปุ่ม '+ เพิ่มบ้าน' เพื่อบันทึกข้อมูล",
+                            text = if (searchQuery.isEmpty()) "สามารถนำเข้าข้อมูลบ้าน 4,500+ รายการจากไฟล์ CSV ได้ทันที" else "ลองค้นหาด้วยคำค้นอื่น",
                             fontSize = 13.sp,
-                            color = TextMuted
+                            color = TextMuted,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
+                        if (searchQuery.isEmpty()) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        isImporting = true
+                                        val res = repository.importFromCsv(context, clearExisting = false)
+                                        isImporting = false
+                                        households = repository.searchHouseholds(searchQuery, selectedVillageFilter)
+                                        totalCount = repository.getCount()
+                                        distinctVillages = repository.getDistinctVillages()
+                                        Toast.makeText(context, "นำเข้าสำเร็จ ${res.householdsCreated} หลังคาเรือน (${res.residentsCreated} รายชื่อ)", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                if (isImporting) {
+                                    CircularProgressIndicator(color = Color.White, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("กำลังนำเข้าข้อมูลบ้าน...", fontWeight = FontWeight.Bold)
+                                } else {
+                                    Icon(painter = painterResource(id = R.drawable.ic_document), contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("นำเข้าข้อมูลบ้านจาก .ai/all_home.csv", fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
                     }
                 }
             } else {

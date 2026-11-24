@@ -1,5 +1,9 @@
 package com.pocketdev.dropway.data.repository
 
+import android.content.Context
+import com.pocketdev.dropway.core.database.DropwayDatabaseHelper
+import com.pocketdev.dropway.core.database.HouseholdCsvImporter
+import com.pocketdev.dropway.core.database.ImportResult
 import com.pocketdev.dropway.core.database.dao.DeliveryEventDao
 import com.pocketdev.dropway.core.database.dao.HouseholdDao
 import com.pocketdev.dropway.core.database.dao.ResidentDao
@@ -12,11 +16,38 @@ import kotlinx.coroutines.flow.Flow
 class HouseholdRepository(
     private val householdDao: HouseholdDao,
     private val residentDao: ResidentDao,
-    private val eventDao: DeliveryEventDao
+    private val eventDao: DeliveryEventDao,
+    private val dbHelper: DropwayDatabaseHelper? = null
 ) {
     fun observeHouseholds(): Flow<List<Household>> = householdDao.observeAll()
 
     suspend fun getAllHouseholds(): List<Household> = householdDao.getAll()
+
+    suspend fun getCount(): Int = householdDao.getCount()
+
+    suspend fun getDistinctVillages(): List<String> = householdDao.getDistinctVillages()
+
+    suspend fun seedFromCsvIfEmpty(context: Context): ImportResult? {
+        val count = householdDao.getCount()
+        if (count > 0) return null
+        val helper = dbHelper ?: DropwayDatabaseHelper.getInstance(context)
+        val result = HouseholdCsvImporter.importFromAssets(context, helper, "households_master.csv", clearExisting = false)
+        eventDao.logEvent(
+            eventType = "CSV_IMPORT_COMPLETED",
+            details = "โหลดข้อมูลเริ่มต้นสำเร็จ ${result.householdsCreated} หลังคาเรือน (${result.residentsCreated} รายชื่อ) ใช้เวลา ${result.durationMs}ms"
+        )
+        return result
+    }
+
+    suspend fun importFromCsv(context: Context, clearExisting: Boolean = false): ImportResult {
+        val helper = dbHelper ?: DropwayDatabaseHelper.getInstance(context)
+        val result = HouseholdCsvImporter.importFromAssets(context, helper, "households_master.csv", clearExisting = clearExisting)
+        eventDao.logEvent(
+            eventType = "CSV_IMPORT_COMPLETED",
+            details = "นำเข้าข้อมูลจาก CSV สำเร็จ ${result.householdsCreated} หลังคาเรือน (${result.residentsCreated} รายชื่อ) ใช้เวลา ${result.durationMs}ms"
+        )
+        return result
+    }
 
     suspend fun searchHouseholds(query: String, villageFilter: String = ""): List<Household> {
         return householdDao.search(query, villageFilter)
