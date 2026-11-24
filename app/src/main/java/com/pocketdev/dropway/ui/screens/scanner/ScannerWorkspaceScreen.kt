@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -30,6 +31,7 @@ import com.pocketdev.dropway.core.model.Resident
 import com.pocketdev.dropway.core.scanner.BarcodeDecoder
 import com.pocketdev.dropway.core.scanner.BarcodeResult
 import com.pocketdev.dropway.core.scanner.ParcelOcrEngine
+import com.pocketdev.dropway.core.util.AudioFeedback
 import com.pocketdev.dropway.core.util.HouseholdMatcher
 import com.pocketdev.dropway.core.util.MatchResult
 import com.pocketdev.dropway.core.util.MoneyUtils
@@ -164,25 +166,17 @@ fun ScannerWorkspaceScreen(
 
 @Composable
 fun RealCameraBarcodeWorkspace(onParcelSaved: () -> Unit) {
+    val context = LocalContext.current
     var subMode by remember { mutableStateOf(BarcodeSubMode.CONTINUOUS) }
     var scannedQueue by remember { mutableStateOf<List<ScannedQueueItem>>(emptyList()) }
     var duplicateWarning by remember { mutableStateOf<String?>(null) }
     var statusFeedbackMessage by remember { mutableStateOf<String?>(null) }
 
-    // Single mode confirmation dialog state
-    var singleItemToConfirm by remember { mutableStateOf<BarcodeResult?>(null) }
-    var singleRecipientName by remember { mutableStateOf("") }
-    var singleRecipientPhone by remember { mutableStateOf("") }
-    var singleAddress by remember { mutableStateOf("") }
-    var singleCodStr by remember { mutableStateOf("") }
-    var singleDeliveryNotes by remember { mutableStateOf("") }
-    var singleMatchedHousehold by remember { mutableStateOf<Household?>(null) }
-    var singleMatchedResident by remember { mutableStateOf<Resident?>(null) }
-    var singleMatchConfidence by remember { mutableStateOf(0) }
-    var singleMatchReason by remember { mutableStateOf("") }
-
-    // Household search dialog
-    var showHouseholdSelector by remember { mutableStateOf(false) }
+    // Bottom sheet review state (web aligned)
+    var activeBottomSheetDraft by remember { mutableStateOf<ScannedLabelDraft?>(null) }
+    var activePrimaryMatch by remember { mutableStateOf<MatchResult?>(null) }
+    var activeCandidates by remember { mutableStateOf<List<MatchResult>>(emptyList()) }
+    var activeIsDuplicate by remember { mutableStateOf(false) }
 
     // Quick text paste dialog
     var showQuickPasteDialog by remember { mutableStateOf(false) }
@@ -202,20 +196,13 @@ fun RealCameraBarcodeWorkspace(onParcelSaved: () -> Unit) {
         if (tracking.isBlank()) return
 
         scope.launch {
-            // Check tracking duplicate in today's deliveries
             val isDup = deliveryRepo.isTrackingDuplicate(tracking)
-            if (isDup) {
-                duplicateWarning = "เลขพัสดุ $tracking เคยบันทึกในระบบแล้ว"
-                return@launch
-            }
-
-            // Extract initial fields from parsed barcode or text
             var name = result.recipientName
             var phone = result.recipientPhone
             var address = result.address
             var houseNum = result.houseNumber
             var village = result.village
-            var codSatang = result.codAmountSatang
+            val codSatang = result.codAmountSatang
 
             // Tier 1: Check if recipient was previously recorded with this phone or name in past parcels
             if (phone.isNotBlank()) {
@@ -223,34 +210,30 @@ fun RealCameraBarcodeWorkspace(onParcelSaved: () -> Unit) {
                 if (pastParcel != null && pastParcel.householdId != null) {
                     val pastHouse = householdRepo.getHouseholdById(pastParcel.householdId)
                     if (pastHouse != null) {
-                        houseNum = pastHouse.houseNumber
-                        village = pastHouse.village
+                        if (houseNum.isBlank()) houseNum = pastHouse.houseNumber
+                        if (village.isBlank()) village = pastHouse.village
                         if (address.isBlank()) address = pastHouse.fullAddress()
                     }
                 }
             }
 
             // Tier 2: Match against Household Database
-            val match = householdRepo.findMatchingHousehold(
+            val candidates = householdRepo.findTopMatchingHouseholds(
                 houseNumber = houseNum,
                 village = village,
                 phone = phone,
                 name = name,
                 address = address
             )
-
-            val matchedHouse = match?.household
-            val matchedRes = match?.matchedResident
-            val confidence = match?.confidenceScore ?: 0
-            val reason = match?.matchReason ?: ""
-
-            if (matchedHouse != null) {
-                if (address.isBlank()) address = matchedHouse.fullAddress()
-                if (name.isBlank() && matchedRes != null) name = matchedRes.fullName
-                if (phone.isBlank() && matchedRes != null) phone = matchedRes.phoneNumber
-            }
+            val primaryMatch = candidates.firstOrNull()
+            val matchedHouse = primaryMatch?.household
+            val matchedRes = primaryMatch?.matchedResident
 
             if (subMode == BarcodeSubMode.CONTINUOUS) {
+                if (isDup) {
+                    duplicateWarning = "เลขพัสดุ $tracking เคยบันทึกในระบบแล้ว"
+                    return@launch
+                }
                 if (scannedQueue.any { it.trackingNumber == tracking }) {
                     duplicateWarning = "เลข $tracking อยู่ในคิวแล้ว"
                     return@launch
@@ -258,14 +241,14 @@ fun RealCameraBarcodeWorkspace(onParcelSaved: () -> Unit) {
                 val item = ScannedQueueItem(
                     trackingNumber = tracking,
                     carrier = result.carrierName,
-                    recipientName = name,
-                    recipientPhone = phone,
-                    address = address,
+                    recipientName = name.ifBlank { matchedRes?.fullName ?: "" },
+                    recipientPhone = phone.ifBlank { matchedRes?.phoneNumber ?: "" },
+                    address = address.ifBlank { matchedHouse?.fullAddress() ?: "" },
                     codAmountSatang = codSatang,
                     matchedHousehold = matchedHouse,
                     matchedResident = matchedRes,
-                    matchConfidence = confidence,
-                    matchReason = reason
+                    matchConfidence = primaryMatch?.confidenceScore ?: 0,
+                    matchReason = primaryMatch?.reasons?.firstOrNull() ?: ""
                 )
                 scannedQueue = scannedQueue + item
                 duplicateWarning = null
@@ -275,41 +258,24 @@ fun RealCameraBarcodeWorkspace(onParcelSaved: () -> Unit) {
                     "สแกน $tracking เข้ารายการแล้ว"
                 }
             } else {
-                // Single Mode: Open full review sheet
-                singleItemToConfirm = result
-                singleRecipientName = name
-                singleRecipientPhone = phone
-                singleAddress = address
-                singleCodStr = if (codSatang > 0L) (codSatang / 100.0).toString() else ""
-                singleDeliveryNotes = if (matchedHouse != null && matchedHouse.notes.isNotBlank()) {
-                    matchedHouse.notes
-                } else ""
-                singleMatchedHousehold = matchedHouse
-                singleMatchedResident = matchedRes
-                singleMatchConfidence = confidence
-                singleMatchReason = reason
+                // Single Mode: Open interactive review bottom sheet identical to Dropway web
+                activePrimaryMatch = primaryMatch
+                activeCandidates = candidates
+                activeIsDuplicate = isDup
+                val postal = SmartTextParser.extractPostalCode(address)
+                activeBottomSheetDraft = ScannedLabelDraft(
+                    recipientName = name.ifBlank { matchedRes?.fullName ?: "" },
+                    recipientPhone = phone.ifBlank { matchedRes?.phoneNumber ?: "" },
+                    houseNumber = houseNum.ifBlank { matchedHouse?.houseNumber ?: "" },
+                    address = address.ifBlank { matchedHouse?.fullAddress() ?: "" },
+                    postalCode = postal.ifBlank { matchedHouse?.postalCode ?: "" },
+                    trackingNumber = tracking,
+                    carrierName = result.carrierName,
+                    codAmountSatang = codSatang,
+                    deliveryNotes = if (matchedHouse != null && matchedHouse.notes.isNotBlank()) matchedHouse.notes else "",
+                    rawText = result.rawText
+                )
                 duplicateWarning = null
-            }
-        }
-    }
-
-    // Auto-match when fields change in Single Mode dialog
-    LaunchedEffect(singleRecipientPhone, singleRecipientName, singleAddress) {
-        if (singleItemToConfirm != null) {
-            val houseNum = SmartTextParser.extractHouseNumber(singleAddress)
-            val village = SmartTextParser.extractVillage(singleAddress)
-            val match = householdRepo.findMatchingHousehold(
-                houseNumber = houseNum,
-                village = village,
-                phone = singleRecipientPhone,
-                name = singleRecipientName,
-                address = singleAddress
-            )
-            if (match != null && match.confidenceScore >= 40) {
-                singleMatchedHousehold = match.household
-                singleMatchedResident = match.matchedResident
-                singleMatchConfidence = match.confidenceScore
-                singleMatchReason = match.matchReason
             }
         }
     }
@@ -441,13 +407,18 @@ fun RealCameraBarcodeWorkspace(onParcelSaved: () -> Unit) {
                     onPhotoCaptured = { bitmap ->
                         // Run full label recognition pipeline on captured photo
                         val recognized = ParcelOcrEngine.processLabel(bitmap)
-                        if (recognized.trackingNumber.isNotBlank() || recognized.recipientName.isNotBlank()) {
+                        val track = recognized.trackingNumber.ifBlank {
+                            if (recognized.recipientName.isNotBlank() || recognized.fullAddress.isNotBlank()) {
+                                TrackingUtils.generateTracking("OCR")
+                            } else ""
+                        }
+                        if (track.isNotBlank() || recognized.recipientName.isNotBlank() || recognized.houseNumber.isNotBlank()) {
                             resolveBarcodeAndMatch(
                                 BarcodeResult(
                                     rawText = recognized.rawOcrText,
-                                    normalizedTracking = recognized.trackingNumber,
+                                    normalizedTracking = track.ifBlank { TrackingUtils.generateTracking("OCR") },
                                     format = com.google.zxing.BarcodeFormat.QR_CODE,
-                                    carrierName = recognized.carrierName,
+                                    carrierName = recognized.carrierName.ifBlank { "พัสดุทั่วไป" },
                                     confidence = recognized.confidenceScore,
                                     recipientName = recognized.recipientName,
                                     recipientPhone = recognized.recipientPhone,
@@ -627,219 +598,82 @@ fun RealCameraBarcodeWorkspace(onParcelSaved: () -> Unit) {
             }
         }
 
-        // Single Mode Confirmation Card Dialog
-        if (singleItemToConfirm != null) {
-            val item = singleItemToConfirm!!
-            AlertDialog(
-                onDismissRequest = { singleItemToConfirm = null },
-                title = {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("ยืนยันพัสดุและจับคู่บ้าน", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        Surface(
-                            color = DropwayPrimary.copy(alpha = 0.1f),
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text(
-                                text = item.carrierName,
-                                color = DropwayPrimary,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
+        // Scan Result Bottom Sheet (Web aligned interactive review)
+        if (activeBottomSheetDraft != null) {
+            ScanResultBottomSheet(
+                draft = activeBottomSheetDraft!!,
+                primaryMatch = activePrimaryMatch,
+                candidates = activeCandidates,
+                isDuplicateInToday = activeIsDuplicate,
+                onDismiss = {
+                    activeBottomSheetDraft = null
+                },
+                onAddToNavigation = { draft, house, res ->
+                    scope.launch {
+                        val today = deliveryRepo.getOrCreateToday()
+                        val parcel = Parcel(
+                            deliveryDayId = today.id,
+                            trackingNumber = draft.trackingNumber,
+                            recipientName = draft.recipientName.ifBlank { res?.fullName ?: "รอระบุชื่อผู้รับ" },
+                            recipientPhone = PhoneUtils.normalize(draft.recipientPhone).ifBlank { res?.phoneNumber ?: "" },
+                            householdId = house?.id,
+                            destinationAddress = draft.address.ifBlank { house?.fullAddress() ?: "" },
+                            latitude = house?.latitude,
+                            longitude = house?.longitude,
+                            codAmountSatang = draft.codAmountSatang,
+                            source = "SCAN",
+                            deliveryNotes = if (draft.deliveryNotes.isNotBlank()) draft.deliveryNotes else "ขนส่ง: ${draft.carrierName}"
+                        )
+                        deliveryRepo.saveParcel(parcel)
+                        AudioFeedback.beepSuccess(context)
+                        activeBottomSheetDraft = null
+                        statusFeedbackMessage = "บันทึกพัสดุ ${draft.trackingNumber} เข้าคิววันนี้สำเร็จ"
+                        onParcelSaved()
                     }
                 },
-                text = {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .verticalScroll(rememberScrollState())
-                    ) {
-                        Text(
-                            text = "เลขพัสดุ: ${item.normalizedTracking}",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp,
-                            color = DropwayPrimary
+                onSaveAsNewHouse = { draft ->
+                    scope.launch {
+                        val newHouse = Household(
+                            houseNumber = draft.houseNumber.ifBlank { SmartTextParser.extractHouseNumber(draft.address) }.ifBlank { "ไม่ระบุ" },
+                            village = SmartTextParser.extractVillage(draft.address),
+                            villageName = "",
+                            subdistrict = "",
+                            district = "",
+                            province = "",
+                            postalCode = draft.postalCode,
+                            notes = draft.deliveryNotes
                         )
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Database Match Card
-                        if (singleMatchedHousehold != null) {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = Color(0xFFF0FDF4),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBBF7D0)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Column(modifier = Modifier.padding(10.dp)) {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(painter = painterResource(id = R.drawable.ic_check), contentDescription = null, tint = StatusDelivered, modifier = Modifier.size(16.dp))
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text(
-                                                text = "ตรงกับฐานข้อมูล (${singleMatchConfidence}%)",
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 12.sp,
-                                                color = Color(0xFF166534)
-                                            )
-                                        }
-                                        TextButton(
-                                            onClick = { showHouseholdSelector = true },
-                                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                                        ) {
-                                            Text("เปลี่ยนบ้าน", fontSize = 11.sp, color = DropwayPrimary, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
-                                    Text(
-                                        text = "บ้านเลขที่ ${singleMatchedHousehold!!.houseNumber} หมู่ ${singleMatchedHousehold!!.village} ${singleMatchedHousehold!!.villageName}",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = TextPrimary
-                                    )
-                                    if (singleMatchedResident != null) {
-                                        Text(
-                                            text = "ผู้อยู่อาศัย: ${singleMatchedResident!!.fullName} • ${singleMatchedResident!!.phoneNumber}",
-                                            fontSize = 11.sp,
-                                            color = Color(0xFF15803D)
-                                        )
-                                    }
-                                    if (singleMatchedHousehold!!.notes.isNotBlank()) {
-                                        Text(
-                                            text = "หมายเหตุบ้าน: ${singleMatchedHousehold!!.notes}",
-                                            fontSize = 11.sp,
-                                            color = Color(0xFFB45309)
-                                        )
-                                    }
-                                    if (singleMatchedHousehold!!.latitude != null) {
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = "มีพิกัดแผนที่แล้ว พร้อมนำทาง",
-                                            fontSize = 10.sp,
-                                            color = Color(0xFF0369A1),
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    }
-                                }
-                            }
-                        } else {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = Color(0xFFF8FAFC),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(10.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "ยังไม่พบบ้านในฐานข้อมูล",
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            color = TextSecondary
-                                        )
-                                        Text(
-                                            text = "ค้นหาเพื่อเชื่อมโยงกับฐานข้อมูล",
-                                            fontSize = 11.sp,
-                                            color = Color(0xFF94A3B8)
-                                        )
-                                    }
-                                    Button(
-                                        onClick = { showHouseholdSelector = true },
-                                        colors = ButtonDefaults.buttonColors(containerColor = DropwayPrimary),
-                                        shape = RoundedCornerShape(8.dp),
-                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
-                                    ) {
-                                        Text("เลือกบ้าน", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-                        DropwayOutlinedTextField(
-                            value = singleRecipientName,
-                            onValueChange = { singleRecipientName = it },
-                            label = { Text("ชื่อผู้รับ") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                        val houseId = householdRepo.saveHouseholdWithResident(
+                            household = newHouse,
+                            residentName = draft.recipientName,
+                            residentPhone = draft.recipientPhone
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        DropwayOutlinedTextField(
-                            value = singleRecipientPhone,
-                            onValueChange = { singleRecipientPhone = it },
-                            label = { Text("เบอร์โทร") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
+                        val savedHouse = householdRepo.getHouseholdById(houseId)
+                        val today = deliveryRepo.getOrCreateToday()
+                        val parcel = Parcel(
+                            deliveryDayId = today.id,
+                            trackingNumber = draft.trackingNumber,
+                            recipientName = draft.recipientName.ifBlank { "รอระบุชื่อผู้รับ" },
+                            recipientPhone = PhoneUtils.normalize(draft.recipientPhone),
+                            householdId = houseId,
+                            destinationAddress = draft.address.ifBlank { savedHouse?.fullAddress() ?: "" },
+                            latitude = savedHouse?.latitude,
+                            longitude = savedHouse?.longitude,
+                            codAmountSatang = draft.codAmountSatang,
+                            source = "SCAN",
+                            deliveryNotes = if (draft.deliveryNotes.isNotBlank()) draft.deliveryNotes else "ขนส่ง: ${draft.carrierName}"
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        DropwayOutlinedTextField(
-                            value = singleAddress,
-                            onValueChange = { singleAddress = it },
-                            label = { Text("ที่อยู่จัดส่ง") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        DropwayOutlinedTextField(
-                            value = singleCodStr,
-                            onValueChange = { singleCodStr = it },
-                            label = { Text("ยอดเงิน COD (บาท)") },
-                            modifier = Modifier.fillMaxWidth(),
-                            singleLine = true
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        DropwayOutlinedTextField(
-                            value = singleDeliveryNotes,
-                            onValueChange = { singleDeliveryNotes = it },
-                            label = { Text("หมายเหตุการส่ง") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        deliveryRepo.saveParcel(parcel)
+                        AudioFeedback.beepSuccess(context)
+                        activeBottomSheetDraft = null
+                        statusFeedbackMessage = "บันทึกบ้านใหม่และลงคิวสำเร็จ"
+                        onParcelSaved()
                     }
                 },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                val today = deliveryRepo.getOrCreateToday()
-                                val house = singleMatchedHousehold
-                                val parcel = Parcel(
-                                    deliveryDayId = today.id,
-                                    trackingNumber = item.normalizedTracking,
-                                    recipientName = singleRecipientName.trim().ifBlank { "รอระบุชื่อผู้รับ" },
-                                    recipientPhone = PhoneUtils.normalize(singleRecipientPhone),
-                                    householdId = house?.id,
-                                    destinationAddress = singleAddress.trim().ifBlank { house?.fullAddress() ?: "" },
-                                    latitude = house?.latitude,
-                                    longitude = house?.longitude,
-                                    codAmountSatang = MoneyUtils.parseToSatang(singleCodStr),
-                                    source = "SCAN",
-                                    deliveryNotes = if (singleDeliveryNotes.isNotBlank()) singleDeliveryNotes else "ขนส่ง: ${item.carrierName}"
-                                )
-                                deliveryRepo.saveParcel(parcel)
-                                singleItemToConfirm = null
-                                onParcelSaved()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = StatusDelivered)
-                    ) {
-                        Text("บันทึกเข้างานวันนี้", fontWeight = FontWeight.Bold)
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { singleItemToConfirm = null }) {
-                        Text("ยกเลิก")
-                    }
+                onScanNext = {
+                    AudioFeedback.beepCapture(context)
+                    activeBottomSheetDraft = null
+                    duplicateWarning = null
                 }
             )
         }
@@ -903,29 +737,7 @@ fun RealCameraBarcodeWorkspace(onParcelSaved: () -> Unit) {
             )
         }
 
-        // Household Selector Modal Dialog
-        if (showHouseholdSelector) {
-            HouseholdSelectorDialog(
-                onHouseholdSelected = { selectedHouse, selectedRes ->
-                    singleMatchedHousehold = selectedHouse
-                    singleMatchedResident = selectedRes
-                    if (singleAddress.isBlank() || singleAddress == singleMatchedHousehold?.fullAddress()) {
-                        singleAddress = selectedHouse.fullAddress()
-                    }
-                    if (selectedRes != null) {
-                        if (singleRecipientName.isBlank()) singleRecipientName = selectedRes.fullName
-                        if (singleRecipientPhone.isBlank()) singleRecipientPhone = selectedRes.phoneNumber
-                    }
-                    if (selectedHouse.notes.isNotBlank() && singleDeliveryNotes.isBlank()) {
-                        singleDeliveryNotes = selectedHouse.notes
-                    }
-                    singleMatchConfidence = 100
-                    singleMatchReason = "เลือกด้วยตนเองจากฐานข้อมูล"
-                    showHouseholdSelector = false
-                },
-                onDismiss = { showHouseholdSelector = false }
-            )
-        }
+
     }
 }
 

@@ -5,7 +5,7 @@ import java.text.Normalizer
 /**
  * Implements canonical Thai text normalization conforming to OpenThai 2.1 OCR specifications.
  * Handles legacy PUA shifted glyphs, tone mark / vowel reordering, Sara Am composition,
- * duplicate mark deduplication, and Unicode NFC normalization.
+ * duplicate mark deduplication, Thai digits to Arabic numerals, and OCR numeric run repair.
  */
 object ThaiNormUtils {
 
@@ -31,6 +31,49 @@ object ThaiNormUtils {
 
     private val vowelMarks = setOf('ั', 'ิ', 'ี', 'ึ', 'ื', 'ุ', 'ู', 'ฺ', '็')
     private val toneMarks = setOf('่', '้', '๊', '๋', '์', '๎')
+
+    private const val THAI_DIGITS = "๐๑๒๓๔๕๖๗๘๙"
+
+    private val confusionMap = mapOf(
+        'O' to '0', 'o' to '0', 'D' to '0', 'Q' to '0',
+        'I' to '1', 'l' to '1', '|' to '1', 'i' to '1',
+        'S' to '5', 's' to '5',
+        'B' to '8',
+        'Z' to '2', 'z' to '2',
+        'G' to '6'
+    )
+
+    /**
+     * Converts Thai numerals (๐-๙) to Arabic numerals (0-9).
+     */
+    fun thaiDigitsToArabic(text: String): String {
+        if (!text.any { it in '๐'..'๙' }) return text
+        val sb = StringBuilder(text.length)
+        for (c in text) {
+            val idx = THAI_DIGITS.indexOf(c)
+            if (idx >= 0) sb.append(idx) else sb.append(c)
+        }
+        return sb.toString()
+    }
+
+    /**
+     * Resolves characters often misread by OCR in digit-dominant runs (e.g. 0/O, 1/l, 5/S, 8/B).
+     */
+    fun normalizeNumericRuns(text: String): String {
+        return text.replace("[0-9A-Za-z|]{4,}".toRegex()) { match ->
+            val run = match.value
+            val digitCount = run.count { it.isDigit() }
+            if (digitCount == 0 || (digitCount.toDouble() / run.length) < 0.6) {
+                run
+            } else {
+                val sb = StringBuilder(run.length)
+                for (ch in run) {
+                    sb.append(confusionMap[ch] ?: ch)
+                }
+                sb.toString()
+            }
+        }
+    }
 
     /**
      * Normalizes Thai text into canonical form according to OpenThai 2.1 specs.
@@ -58,23 +101,28 @@ object ThaiNormUtils {
 
         var text = sb.toString()
 
-        // 3. Compose duplicate Sara E (เเ) into Sara Ae (แ)
+        // 3. Convert Thai numerals to Arabic numerals
+        text = thaiDigitsToArabic(text)
+
+        // 4. Resolve OCR confusion in numeric runs (phone, tracking, postal)
+        text = normalizeNumericRuns(text)
+
+        // 5. Compose duplicate Sara E (เเ) into Sara Ae (แ)
         text = text.replace("เเ", "แ")
 
-        // 4. Sara Am composition: Nikhahit + Tone + Sara Aa -> Tone + Sara Am
-        // e.g. นํ้า -> น้ำ
+        // 6. Sara Am composition: Nikhahit + Tone + Sara Aa -> Tone + Sara Am
         text = text.replace("\u0E4D([\u0E48-\u0E4C])\u0E32".toRegex(), "$1ำ")
         text = text.replace("([\u0E48-\u0E4C])\u0E4D\u0E32".toRegex(), "$1ำ")
         text = text.replace("\u0E4D\u0E32", "ำ")
 
-        // 5. Deduplicate repeated vowel/tone marks (e.g. ำำ -> ำ, ่่ -> ่)
+        // 7. Deduplicate repeated vowel/tone marks
         text = text.replace("([ัิีึืฺุู็่้๊๋์])\\1+".toRegex(), "$1")
         text = text.replace("ำ+".toRegex(), "ำ")
 
-        // 6. Canonical mark reordering: base + vowel + tone + nikhahit
+        // 8. Canonical mark reordering: base + vowel + tone + nikhahit
         text = reorderVowelAndTone(text)
 
-        // 7. Collapse multi-spaces and trim
+        // 9. Collapse multi-spaces and trim
         text = text.replace("[ \\t]+".toRegex(), " ")
             .lines()
             .joinToString("\n") { it.trim() }
@@ -88,7 +136,6 @@ object ThaiNormUtils {
         var i = 0
         while (i < text.length) {
             val c = text[i]
-            // If tone mark precedes a vowel mark, swap them (canonical order: vowel then tone)
             if (i + 1 < text.length && toneMarks.contains(c) && vowelMarks.contains(text[i + 1])) {
                 val tone = c
                 val vowel = text[i + 1]

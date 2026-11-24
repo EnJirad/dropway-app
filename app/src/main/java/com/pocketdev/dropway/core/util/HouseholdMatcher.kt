@@ -3,11 +3,20 @@ package com.pocketdev.dropway.core.util
 import com.pocketdev.dropway.core.model.Household
 import com.pocketdev.dropway.core.model.Resident
 
+enum class MatchLevel(val label: String) {
+    EXACT("ตรงมาก"),
+    HIGH("ใกล้เคียงสูง"),
+    MEDIUM("อาจใช่")
+}
+
 data class MatchResult(
     val household: Household,
     val matchedResident: Resident? = null,
     val confidenceScore: Int, // 0 - 100
-    val matchReason: String
+    val level: MatchLevel = MatchLevel.MEDIUM,
+    val matchReason: String,
+    val reasons: List<String> = emptyList(),
+    val conflicts: List<String> = emptyList()
 )
 
 object HouseholdMatcher {
@@ -33,7 +42,6 @@ object HouseholdMatcher {
     /**
      * Attempts to find the best matching household from existing households.
      * Considers house number, village (Moo), phone numbers, resident names, and address text.
-     * Never automatically merges uncertain matches.
      */
     fun findBestMatch(
         households: List<Household>,
@@ -85,6 +93,7 @@ object HouseholdMatcher {
         for (h in households) {
             var score = 0
             val reasons = mutableListOf<String>()
+            val conflicts = mutableListOf<String>()
 
             // 1. Phone match against residents (Very strong indicator)
             val houseResidents = residents.filter { it.householdId == h.id }
@@ -93,8 +102,10 @@ object HouseholdMatcher {
             } else null
 
             if (phoneMatch != null) {
-                score += 50
-                reasons.add("เบอร์โทรตรงกับผู้อยู่อาศัย (${phoneMatch.fullName})")
+                score += 55
+                reasons.add("เบอร์โทรตรง")
+            } else if (cleanPhone.isNotBlank() && houseResidents.any { it.phoneNumber.isNotBlank() }) {
+                conflicts.add("เบอร์บนฉลากไม่ตรงกับเบอร์ในคลัง")
             }
 
             // 2. Name match against residents
@@ -112,9 +123,17 @@ object HouseholdMatcher {
                 }
             } else null
 
+            val isExactName = nameMatch != null && cleanNameNormalized.isNotBlank() &&
+                    cleanResidentName(nameMatch.fullName).equals(cleanNameNormalized, ignoreCase = true)
+
             if (nameMatch != null) {
-                score += 35
-                reasons.add("ชื่อตรงกับผู้อยู่อาศัย (${nameMatch.fullName})")
+                if (isExactName) {
+                    score += 45
+                    reasons.add("ชื่อตรง")
+                } else {
+                    score += 30
+                    reasons.add("ชื่อใกล้เคียง")
+                }
             }
 
             // 3. House number match
@@ -125,8 +144,8 @@ object HouseholdMatcher {
             )
 
             if (houseMatches) {
-                score += 30
-                reasons.add("บ้านเลขที่ตรงกัน (${h.houseNumber})")
+                score += 35
+                reasons.add("บ้านเลขที่ตรง")
 
                 // Moo match together with house number
                 val normHMoo = normalizeVillage(h.village)
@@ -137,32 +156,42 @@ object HouseholdMatcher {
 
                 if (mooMatches) {
                     score += 25
-                    reasons.add("หมู่ตรงกัน (หมู่ ${h.village})")
+                    reasons.add("หมู่ตรง (หมู่ ${h.village})")
                 } else if (cleanMoo.isNotBlank() && h.village.isNotBlank() && !mooMatches) {
-                    // Conflicting Moo reduces confidence
-                    score -= 30
+                    conflicts.add("หมู่อยู่คนละหมู่")
+                    score -= 20
                 }
             }
 
             // 4. Address keywords / village name match
             if (targetAddress.isNotBlank()) {
                 if (h.villageName.isNotBlank() && targetAddress.contains(h.villageName, ignoreCase = true)) {
-                    score += 20
-                    reasons.add("ชื่อหมู่บ้านตรงกัน (${h.villageName})")
+                    score += 15
+                    reasons.add("ชื่อหมู่บ้านตรง")
                 }
                 if (h.addressDescription.isNotBlank() && targetAddress.contains(h.addressDescription, ignoreCase = true)) {
-                    score += 15
-                    reasons.add("รายละเอียดที่อยู่ตรงกัน (${h.addressDescription})")
+                    score += 10
+                    reasons.add("รายละเอียดที่อยู่ตรง")
                 }
             }
 
-            if (score >= 40) {
+            val finalScore = score.coerceIn(0, 100)
+            if (finalScore >= 35) {
+                val level = when {
+                    (phoneMatch != null && (houseMatches || nameMatch != null)) || (isExactName && houseMatches) || finalScore >= 85 -> MatchLevel.EXACT
+                    phoneMatch != null || (nameMatch != null && houseMatches) || finalScore >= 60 -> MatchLevel.HIGH
+                    else -> MatchLevel.MEDIUM
+                }
+
                 candidates.add(
                     MatchResult(
                         household = h,
                         matchedResident = phoneMatch ?: nameMatch,
-                        confidenceScore = score.coerceIn(0, 100),
-                        matchReason = reasons.joinToString(", ")
+                        confidenceScore = finalScore,
+                        level = level,
+                        matchReason = reasons.joinToString(", "),
+                        reasons = reasons,
+                        conflicts = conflicts
                     )
                 )
             }
