@@ -229,6 +229,7 @@ fun SmartOcrScreen(
                                 Image(
                                     bitmap = capturedBitmap!!.asImageBitmap(),
                                     contentDescription = "ภาพฉลากที่ถ่าย",
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                     modifier = Modifier
                                         .size(60.dp)
                                         .clip(RoundedCornerShape(8.dp))
