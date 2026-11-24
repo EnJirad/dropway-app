@@ -46,7 +46,11 @@ data class ScannedLabelDraft(
     val carrierName: String = "",
     val codAmountSatang: Long = 0L,
     val deliveryNotes: String = "",
-    val rawText: String = ""
+    val rawText: String = "",
+    val orderId: String = "",
+    val sortingCode: String = "",
+    val sellerPlatform: String = "",
+    val confidenceScore: Int = 90
 )
 
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
@@ -182,18 +186,35 @@ fun ScanResultBottomSheet(
                     )
                 }
 
-                if (draft.carrierName.isNotBlank()) {
-                    Surface(
-                        color = DropwayBlueSurface,
-                        shape = RoundedCornerShape(6.dp)
-                    ) {
-                        Text(
-                            text = draft.carrierName,
-                            color = DropwayPrimary,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (draft.carrierName.isNotBlank()) {
+                        Surface(
+                            color = DropwayBlueSurface,
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = draft.carrierName,
+                                color = DropwayPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                    if (draft.sortingCode.isNotBlank()) {
+                        Surface(
+                            color = Color(0xFFF0FDF4),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBBF7D0)),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = draft.sortingCode,
+                                color = Color(0xFF166534),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
                     }
                 }
             }

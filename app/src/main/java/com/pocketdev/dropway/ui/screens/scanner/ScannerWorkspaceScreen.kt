@@ -275,7 +275,11 @@ fun RealCameraBarcodeWorkspace(onParcelSaved: () -> Unit) {
                     carrierName = result.carrierName,
                     codAmountSatang = codSatang,
                     deliveryNotes = if (matchedHouse != null && matchedHouse.notes.isNotBlank()) matchedHouse.notes else "",
-                    rawText = result.rawText
+                    rawText = result.rawText,
+                    orderId = result.orderId,
+                    sortingCode = result.sortingCode,
+                    sellerPlatform = result.sellerPlatform,
+                    confidenceScore = result.confidence
                 )
                 duplicateWarning = null
             }
@@ -429,7 +433,10 @@ fun RealCameraBarcodeWorkspace(onParcelSaved: () -> Unit) {
                                             address = recognized.fullAddress,
                                             houseNumber = recognized.houseNumber,
                                             village = recognized.villageMoo,
-                                            codAmountSatang = recognized.codAmountSatang
+                                            codAmountSatang = recognized.codAmountSatang,
+                                            orderId = recognized.orderId,
+                                            sortingCode = recognized.sortingCode,
+                                            sellerPlatform = recognized.sellerPlatform
                                         )
                                     )
                                 } else {

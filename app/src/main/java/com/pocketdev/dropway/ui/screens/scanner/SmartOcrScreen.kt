@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,8 +24,11 @@ import androidx.compose.ui.unit.sp
 import com.pocketdev.dropway.DropwayApplication
 import com.pocketdev.dropway.R
 import com.pocketdev.dropway.core.model.Parcel
+import com.pocketdev.dropway.core.scanner.FieldConflict
+import com.pocketdev.dropway.core.scanner.LabelOcrEngine
 import com.pocketdev.dropway.core.scanner.LabelRecognitionResult
 import com.pocketdev.dropway.core.scanner.ParcelOcrEngine
+import com.pocketdev.dropway.core.scanner.StructuredFieldExtractor
 import com.pocketdev.dropway.core.util.MatchResult
 import com.pocketdev.dropway.core.util.MoneyUtils
 import com.pocketdev.dropway.core.util.PhoneUtils
@@ -53,10 +57,15 @@ fun SmartOcrScreen(
     var capturedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
 
+    // Recognition Result Data State
+    var recognitionResult by remember { mutableStateOf<LabelRecognitionResult?>(null) }
+
     // Form fields
-    var rawOcrText by remember { mutableStateOf("") }
     var trackingNumber by remember { mutableStateOf("") }
     var carrierName by remember { mutableStateOf("") }
+    var orderId by remember { mutableStateOf("") }
+    var sortingCode by remember { mutableStateOf("") }
+    var sellerPlatform by remember { mutableStateOf("") }
     var recipientName by remember { mutableStateOf("") }
     var recipientPhone by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
@@ -67,7 +76,7 @@ fun SmartOcrScreen(
     var province by remember { mutableStateOf("") }
     var postalCode by remember { mutableStateOf("") }
     var codAmountStr by remember { mutableStateOf("") }
-    var detectionSource by remember { mutableStateOf("OCR") }
+    var rawOcrText by remember { mutableStateOf("") }
 
     var isParsed by remember { mutableStateOf(false) }
     var matchedResult by remember { mutableStateOf<MatchResult?>(null) }
@@ -90,15 +99,19 @@ fun SmartOcrScreen(
         }
     }
 
-    // Function to run the full modular label recognition pipeline in background
+    // Executes full label recognition pipeline in background
     fun executeRecognition(bitmap: Bitmap) {
         isProcessing = true
         capturedBitmap = bitmap
         scope.launch(Dispatchers.Default) {
             val result: LabelRecognitionResult = ParcelOcrEngine.processLabel(bitmap)
             withContext(Dispatchers.Main) {
+                recognitionResult = result
                 trackingNumber = result.trackingNumber
                 carrierName = result.carrierName
+                orderId = result.orderId
+                sortingCode = result.sortingCode
+                sellerPlatform = result.sellerPlatform
                 recipientName = result.recipientName
                 recipientPhone = result.recipientPhone
                 address = result.fullAddress
@@ -108,9 +121,8 @@ fun SmartOcrScreen(
                 district = result.district
                 province = result.province
                 postalCode = result.postalCode
-                codAmountStr = if (result.codAmountSatang > 0) (result.codAmountSatang / 100.0).toString() else ""
+                codAmountStr = if (result.codAmountSatang > 0L) (result.codAmountSatang / 100.0).toString() else ""
                 rawOcrText = result.rawOcrText
-                detectionSource = result.detectionSource
                 isParsed = true
                 isProcessing = false
 
@@ -172,7 +184,7 @@ fun SmartOcrScreen(
             Box(modifier = Modifier.fillMaxSize()) {
                 Camera2ScannerView(
                     isContinuousMode = false,
-                    overlayGuideText = "จัดกรอบให้เห็นฉลากพัสดุและบาร์โค้ดชัดเจน",
+                    overlayGuideText = "จัดกรอบให้เห็นฉลากพัสดุทั้งใบเพื่ออ่านข้อมูลอัตโนมัติ",
                     onBarcodeDetected = { barcode ->
                         trackingNumber = barcode.normalizedTracking
                         carrierName = barcode.carrierName
@@ -186,7 +198,7 @@ fun SmartOcrScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.6f)),
+                            .background(Color.Black.copy(alpha = 0.65f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Card(
@@ -200,9 +212,15 @@ fun SmartOcrScreen(
                                 CircularProgressIndicator(color = DropwayPrimary)
                                 Spacer(modifier = Modifier.height(14.dp))
                                 Text(
-                                    text = "กำลังประมวลผลฉลากพัสดุ On-Device...",
+                                    text = "กำลังวิเคราะห์ฉลากพัสดุด้วย AI On-Device...",
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 13.sp
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "อ่านบาร์โค้ด QR และข้อความทั้งใบแบบออฟไลน์",
+                                    fontSize = 11.sp,
+                                    color = TextSecondary
                                 )
                             }
                         }
@@ -217,7 +235,7 @@ fun SmartOcrScreen(
                     .padding(16.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                // If photo was captured, show photo preview with Retake button
+                // Photo Preview Card with Retake Button
                 if (capturedBitmap != null) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
@@ -238,21 +256,22 @@ fun SmartOcrScreen(
                                     contentDescription = "ภาพฉลากที่ถ่าย",
                                     contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                                     modifier = Modifier
-                                        .size(60.dp)
+                                        .size(64.dp)
                                         .clip(RoundedCornerShape(8.dp))
                                         .border(1.dp, Color(0xFFCBD5E1), RoundedCornerShape(8.dp))
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
-                                        text = "ภาพถ่ายฉลากพัสดุ",
+                                        text = "ภาพถ่ายฉลากพัสดุต้นฉบับ",
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 13.sp
                                     )
+                                    val confScore = recognitionResult?.confidenceScore ?: 90
                                     Text(
-                                        text = "ประมวลผลสำเร็จ (${detectionSource})",
+                                        text = "วิเคราะห์สำเร็จ (ความมั่นใจ $confScore%)",
                                         fontSize = 11.sp,
-                                        color = StatusDelivered,
+                                        color = if (confScore >= 80) StatusDelivered else DropwayPrimary,
                                         fontWeight = FontWeight.Medium
                                     )
                                 }
@@ -276,7 +295,7 @@ fun SmartOcrScreen(
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                // Text Input Area (if in TEXT_INPUT mode or wanting to re-analyze)
+                // Text Input Area (if in TEXT_INPUT mode)
                 if (inputMode == OcrInputMode.TEXT_INPUT && !isParsed) {
                     Surface(
                         shape = RoundedCornerShape(16.dp),
@@ -286,7 +305,7 @@ fun SmartOcrScreen(
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
                             Text(
-                                text = "ข้อความจากฉลากพัสดุ (Text Parser)",
+                                text = "ข้อความจากฉลากพัสดุ (Text Input)",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
                                 color = TextPrimary
@@ -300,14 +319,12 @@ fun SmartOcrScreen(
                             Spacer(modifier = Modifier.height(12.dp))
                             DropwayOutlinedTextField(
                                 value = rawOcrText,
-                                onValueChange = {
-                                    rawOcrText = it
-                                },
+                                onValueChange = { rawOcrText = it },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(130.dp),
                                 placeholder = {
-                                    Text("วางข้อความฉลากพัสดุที่นี่...\n(เช่น Flash Express TH123456789 ผู้รับ: วิภาดา วงศ์ใหญ่ โทร: 089-988-7766 ที่อยู่: 55/4 หมู่ 5 ต.หนองหอย อ.เมือง จ.เชียงใหม่ 50000 COD: 280 บาท)")
+                                    Text("วางข้อความฉลากพัสดุที่นี่...\n(เช่น J&T Express 828123456789 Order ID: TT123456789TH ผู้รับ: สมชาย ใจดี โทร: 0812345678 ที่อยู่: 123/45 หมู่ 2 ต.บางกร่าง อ.เมือง จ.นนทบุรี 11000 COD: 350 บาท)")
                                 },
                                 shape = RoundedCornerShape(12.dp)
                             )
@@ -318,28 +335,32 @@ fun SmartOcrScreen(
                             ) {
                                 TextButton(
                                     onClick = {
-                                        rawOcrText = "Flash Express พัสดุ: TH1234598765 ผู้รับ: น.ส.วิภาดา วงศ์ใหญ่ โทร: 089-988-7766 ที่อยู่: 55/4 หมู่ 5 ต.หนองหอย อ.เมือง จ.เชียงใหม่ 50000 เก็บเงินปลายทาง: 280 บาท"
+                                        rawOcrText = "J&T Express เลขพัสดุ: 828123456789 Order ID: TT261124998TH คัดแยก: 2 BKK-01 ผู้รับ: สมชาย ใจดี โทร: 0812345678 ที่อยู่: 123/45 หมู่ 2 ต.บางกร่าง อ.เมือง จ.นนทบุรี 11000 เก็บเงินปลายทาง: 350 บาท"
                                     }
                                 ) {
-                                    Text("ใส่ตัวอย่างฉลาก", fontSize = 11.sp)
+                                    Text("ใส่ตัวอย่าง J&T/TikTok", fontSize = 11.sp)
                                 }
                                 Button(
                                     onClick = {
                                         if (rawOcrText.isNotBlank()) {
-                                            val parsed = SmartTextParser.parseFreeText(rawOcrText)
+                                            val ocrResult = LabelOcrEngine.OcrEngineResult(rawOcrText, emptyList(), 0.9f)
+                                            val parsed = StructuredFieldExtractor.extract(emptyList(), ocrResult, rawOcrText)
+                                            recognitionResult = parsed
                                             trackingNumber = parsed.trackingNumber
-                                            carrierName = parsed.carrier.ifBlank { "พัสดุทั่วไป" }
+                                            carrierName = parsed.carrierName
+                                            orderId = parsed.orderId
+                                            sortingCode = parsed.sortingCode
+                                            sellerPlatform = parsed.sellerPlatform
                                             recipientName = parsed.recipientName
                                             recipientPhone = parsed.recipientPhone
-                                            address = parsed.address
+                                            address = parsed.fullAddress
                                             houseNumber = parsed.houseNumber
-                                            villageMoo = parsed.village
+                                            villageMoo = parsed.villageMoo
                                             subdistrict = parsed.subdistrict
                                             district = parsed.district
                                             province = parsed.province
                                             postalCode = parsed.postalCode
-                                            codAmountStr = if (parsed.codAmountSatang > 0) (parsed.codAmountSatang / 100.0).toString() else ""
-                                            detectionSource = "TEXT_OCR"
+                                            codAmountStr = if (parsed.codAmountSatang > 0L) (parsed.codAmountSatang / 100.0).toString() else ""
                                             isParsed = true
                                         }
                                     },
@@ -354,8 +375,71 @@ fun SmartOcrScreen(
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
-                // Extracted Editable Form & Household Match Card
+                // Extracted Editable Form
                 if (isParsed) {
+                    // Conflicts Banner (if any)
+                    val conflicts = recognitionResult?.conflicts ?: emptyList()
+                    if (conflicts.isNotEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color(0xFFFEF2F2),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFECACA)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(painter = painterResource(id = R.drawable.ic_warning), contentDescription = null, tint = Color(0xFFDC2626), modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("พบข้อมูลขัดแย้งกันระหว่างแหล่งข้อมูล (แตะเพื่อเลือกค่าที่ถูกต้อง):", fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color(0xFF991B1B))
+                                }
+                                Spacer(modifier = Modifier.height(8.dp))
+                                conflicts.forEach { c ->
+                                    Text("${c.fieldLabel}:", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF991B1B))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.padding(top = 2.dp)) {
+                                        FilterChip(
+                                            selected = (trackingNumber == c.valueA),
+                                            onClick = { trackingNumber = c.valueA },
+                                            label = { Text("${c.sourceA}: ${c.valueA}", fontSize = 11.sp) }
+                                        )
+                                        FilterChip(
+                                            selected = (trackingNumber == c.valueB),
+                                            onClick = { trackingNumber = c.valueB },
+                                            label = { Text("${c.sourceB}: ${c.valueB}", fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    // Missing fields warning
+                    val missing = recognitionResult?.missingFields ?: emptyList()
+                    if (missing.isNotEmpty()) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = Color(0xFFFFFBEB),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFDE68A)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Icon(painter = painterResource(id = R.drawable.ic_warning), contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(15.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                val missingNames = missing.map {
+                                    when (it) {
+                                        "recipientPhone" -> "เบอร์โทร"
+                                        "recipientName" -> "ชื่อผู้รับ"
+                                        "fullAddress" -> "ที่อยู่"
+                                        "trackingNumber" -> "เลขพัสดุ"
+                                        else -> it
+                                    }
+                                }.joinToString(", ")
+                                Text("ยังไม่พบข้อมูล: $missingNames (โปรดตรวจสอบหรือกรอกเพิ่มเติม)", fontSize = 11.sp, color = Color(0xFFB45309), fontWeight = FontWeight.Medium)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         color = Color.White,
@@ -363,28 +447,86 @@ fun SmartOcrScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(16.dp)) {
+                            // Header with Carrier & Sorting / Order info chips
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "ข้อมูลพัสดุที่แยกได้ (ตรวจสอบและแก้ไข)",
+                                    text = "ข้อมูลพัสดุที่แยกได้",
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp
+                                    fontSize = 15.sp,
+                                    color = TextPrimary
                                 )
-                                if (carrierName.isNotBlank()) {
-                                    Surface(
-                                        color = DropwayPrimary.copy(alpha = 0.1f),
-                                        shape = RoundedCornerShape(6.dp)
-                                    ) {
-                                        Text(
-                                            text = carrierName,
-                                            color = DropwayPrimary,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                        )
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    if (carrierName.isNotBlank()) {
+                                        Surface(
+                                            color = DropwayPrimary.copy(alpha = 0.12f),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = carrierName,
+                                                color = DropwayPrimary,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    }
+                                    if (sellerPlatform.isNotBlank()) {
+                                        Surface(
+                                            color = Color(0xFFF1F5F9),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = sellerPlatform,
+                                                color = Color(0xFF475569),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Secondary metadata row: Sorting Code & Order ID
+                            if (sortingCode.isNotBlank() || orderId.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    if (sortingCode.isNotBlank()) {
+                                        Surface(
+                                            color = Color(0xFFF0FDF4),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBBF7D0)),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "คัดแยก: $sortingCode",
+                                                color = Color(0xFF166534),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    if (orderId.isNotBlank()) {
+                                        Surface(
+                                            color = Color(0xFFF8FAFC),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Text(
+                                                text = "Order: $orderId",
+                                                color = Color(0xFF64748B),
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -464,10 +606,46 @@ fun SmartOcrScreen(
                             )
 
                             Spacer(modifier = Modifier.height(8.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                DropwayOutlinedTextField(
+                                    value = subdistrict,
+                                    onValueChange = { subdistrict = it },
+                                    label = { Text("ตำบล/แขวง") },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true
+                                )
+                                DropwayOutlinedTextField(
+                                    value = district,
+                                    onValueChange = { district = it },
+                                    label = { Text("อำเภอ/เขต") },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                DropwayOutlinedTextField(
+                                    value = province,
+                                    onValueChange = { province = it },
+                                    label = { Text("จังหวัด") },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true
+                                )
+                                DropwayOutlinedTextField(
+                                    value = postalCode,
+                                    onValueChange = { postalCode = it },
+                                    label = { Text("รหัสไปรษณีย์") },
+                                    modifier = Modifier.weight(1f),
+                                    singleLine = true
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
                             DropwayOutlinedTextField(
                                 value = codAmountStr,
                                 onValueChange = { codAmountStr = it },
-                                label = { Text("ยอดเงิน COD (บาท)") },
+                                label = { Text("ยอดเงิน COD (บาท) - ปล่อยว่างถ้าจ่ายแล้ว") },
                                 modifier = Modifier.fillMaxWidth(),
                                 singleLine = true
                             )
@@ -578,7 +756,11 @@ fun SmartOcrScreen(
                                             longitude = house?.longitude,
                                             codAmountSatang = MoneyUtils.parseToSatang(codAmountStr),
                                             source = "OCR",
-                                            deliveryNotes = if (carrierName.isNotBlank()) "ขนส่ง: $carrierName" else ""
+                                            deliveryNotes = listOfNotNull(
+                                                if (carrierName.isNotBlank()) "ขนส่ง: $carrierName" else null,
+                                                if (sortingCode.isNotBlank()) "โซน: $sortingCode" else null,
+                                                if (orderId.isNotBlank()) "Order: $orderId" else null
+                                            ).joinToString(" | ")
                                         )
                                         deliveryRepo.saveParcel(parcel)
                                         onParcelSaved()

@@ -2,6 +2,7 @@ package com.pocketdev.dropway.core.scanner
 
 import android.graphics.Bitmap
 import android.graphics.Matrix
+import android.graphics.Rect
 import androidx.camera.core.ImageProxy
 import com.google.zxing.*
 import com.google.zxing.common.HybridBinarizer
@@ -23,7 +24,10 @@ data class BarcodeResult(
     val houseNumber: String = "",
     val village: String = "",
     val codAmountSatang: Long = 0L,
-    val parsedParcel: ParsedParcelRow? = null
+    val parsedParcel: ParsedParcelRow? = null,
+    val orderId: String = "",
+    val sortingCode: String = "",
+    val sellerPlatform: String = ""
 )
 
 object BarcodeDecoder {
@@ -61,8 +65,141 @@ object BarcodeDecoder {
     }
 
     /**
-     * Extracts raw Y-plane bytes from CameraX ImageProxy, properly handling rowStride and padding.
+     * Scans and returns all unique 1D barcodes and 2D QR codes present on the parcel label.
+     * Evaluates the full image and multi-region slices (top, middle, bottom) with deduplication.
      */
+    fun decodeAllBarcodes(bitmap: Bitmap): List<DecodedBarcodeItem> {
+        val discovered = mutableListOf<DecodedBarcodeItem>()
+        val seenTexts = mutableSetOf<String>()
+
+        fun addResult(res: Result?, offsetX: Int = 0, offsetY: Int = 0) {
+            if (res == null) return
+            val text = res.text?.trim() ?: return
+            if (text.isBlank() || seenTexts.contains(text)) return
+            seenTexts.add(text)
+
+            var box: Rect? = null
+            val pts = res.resultPoints
+            if (pts != null && pts.isNotEmpty()) {
+                var minX = Float.MAX_VALUE
+                var minY = Float.MAX_VALUE
+                var maxX = Float.MIN_VALUE
+                var maxY = Float.MIN_VALUE
+                for (pt in pts) {
+                    if (pt.x < minX) minX = pt.x
+                    if (pt.x > maxX) maxX = pt.x
+                    if (pt.y < minY) minY = pt.y
+                    if (pt.y > maxY) maxY = pt.y
+                }
+                box = Rect(
+                    (minX + offsetX).toInt().coerceAtLeast(0),
+                    (minY + offsetY).toInt().coerceAtLeast(0),
+                    (maxX + offsetX).toInt().coerceAtMost(bitmap.width),
+                    (maxY + offsetY).toInt().coerceAtMost(bitmap.height)
+                )
+            }
+
+            val parsed = SmartTextParser.parseFreeText(text)
+            val tracking = if (parsed.trackingNumber.isNotBlank()) {
+                parsed.trackingNumber
+            } else {
+                TrackingUtils.normalize(text)
+            }
+            val carrier = if (parsed.carrier.isNotBlank()) parsed.carrier else detectCarrier(tracking)
+
+            discovered.add(
+                DecodedBarcodeItem(
+                    rawText = text,
+                    format = res.barcodeFormat,
+                    normalizedTracking = tracking,
+                    carrierName = carrier,
+                    boundingBox = box
+                )
+            )
+        }
+
+        synchronized(reader) {
+            // 1. Full image scan (0, 90, 180, 270)
+            decodeRawZxing(bitmap, reader, tryInvert = true)?.let { addResult(it) }
+
+            // 2. Multi-region slices: Top 45%, Middle 45%, Bottom 45%
+            val w = bitmap.width
+            val h = bitmap.height
+
+            // Top third (often contains 2D QR routing / TikTok order code)
+            val topH = (h * 0.45f).toInt().coerceIn(10, h)
+            val topSlice = safeCropBitmap(bitmap, 0, 0, w, topH)
+            if (topSlice != null) {
+                decodeRawZxing(topSlice, reader, tryInvert = true)?.let { addResult(it, 0, 0) }
+                topSlice.recycle()
+            }
+
+            // Middle half (often contains primary 1D tracking barcode)
+            val midY = (h * 0.25f).toInt()
+            val midH = (h * 0.50f).toInt().coerceIn(10, h - midY)
+            val midSlice = safeCropBitmap(bitmap, 0, midY, w, midH)
+            if (midSlice != null) {
+                decodeRawZxing(midSlice, reader, tryInvert = true)?.let { addResult(it, 0, midY) }
+                midSlice.recycle()
+            }
+
+            // Bottom half (often contains secondary tracking / sorting / COD barcodes)
+            val botY = (h * 0.55f).toInt()
+            val botH = (h - botY).coerceIn(10, h)
+            val botSlice = safeCropBitmap(bitmap, 0, botY, w, botH)
+            if (botSlice != null) {
+                decodeRawZxing(botSlice, reader, tryInvert = true)?.let { addResult(it, 0, botY) }
+                botSlice.recycle()
+            }
+        }
+
+        return discovered
+    }
+
+    private fun safeCropBitmap(src: Bitmap, x: Int, y: Int, w: Int, h: Int): Bitmap? {
+        return try {
+            val cx = x.coerceIn(0, src.width - 1)
+            val cy = y.coerceIn(0, src.height - 1)
+            val cw = w.coerceIn(1, src.width - cx)
+            val ch = h.coerceIn(1, src.height - cy)
+            Bitmap.createBitmap(src, cx, cy, cw, ch)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun decodeRawZxing(bitmap: Bitmap, r: MultiFormatReader, tryInvert: Boolean): Result? {
+        val width = bitmap.width
+        val height = bitmap.height
+        val pixels = IntArray(width * height)
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height)
+
+        val source = RGBLuminanceSource(width, height, pixels)
+        val binarizer = HybridBinarizer(source)
+        val binaryBitmap = BinaryBitmap(binarizer)
+
+        try {
+            val res = r.decodeWithState(binaryBitmap)
+            r.reset()
+            return res
+        } catch (_: Exception) {
+            r.reset()
+        }
+
+        if (tryInvert) {
+            try {
+                val invSource = source.invert()
+                val invBitmap = BinaryBitmap(HybridBinarizer(invSource))
+                val res = r.decodeWithState(invBitmap)
+                r.reset()
+                return res
+            } catch (_: Exception) {
+                r.reset()
+            }
+        }
+
+        return null
+    }
     fun extractYBytes(image: ImageProxy): ByteArray {
         val plane = image.planes[0]
         val buffer = plane.buffer
